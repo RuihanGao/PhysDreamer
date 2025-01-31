@@ -13,6 +13,11 @@ import logging
 import argparse
 import torch
 import os
+parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+print(f"parent_dir: {parent_dir}")
+import sys
+sys.path.append(parent_dir)
+
 from physdreamer.utils.config import create_config
 import numpy as np
 
