@@ -22,6 +22,14 @@ import shutil
 import wandb
 import torch
 import os
+import pdb
+# add the path to import motionrep
+import sys
+import os.path as osp
+parent_dir = osp.dirname(osp.dirname(os.getcwd()))
+print(f"add parent_dir {parent_dir} to sys path")
+sys.path.append(parent_dir)
+
 from motionrep.utils.config import create_config
 from motionrep.utils.optimizer import get_linear_schedule_with_warmup
 from time import time
@@ -350,10 +358,14 @@ class Trainer:
                     dir=self.output_path,
                     **{
                         "mode": "online",
-                        "entity": args.wandb_entity,
+                        # "entity": args.wandb_entity,
                         "project": args.wandb_project,
                     },
                 )
+
+                # self.wandb_run = wandb.init(project="SKIT", name=opt.name, config=opt) if not wandb.run else wandb.run
+                # self.wandb_run._label(repo="SKIT")
+
                 wandb.run.log_code(".")
                 wandb.run.name = args.wandb_name
                 print(f"run dir: {run.dir}")
@@ -1422,7 +1434,8 @@ def parse_args():
     parser.add_argument(
         "--dataset_dir",
         type=str,
-        default="../../data/physics_dreamer/hat_nerfstudio/",
+        # default="../../data/physics_dreamer/hat_nerfstudio/",
+        default="../../../../data/physics_dreamer/carnations/",
     )
     parser.add_argument("--video_dir_name", type=str, default="videos")
     parser.add_argument(
@@ -1492,7 +1505,7 @@ def parse_args():
 
     # wandb parameters
     parser.add_argument("--use_wandb", action="store_true", default=False)
-    parser.add_argument("--wandb_entity", type=str, default="mit-cv")
+    parser.add_argument("--wandb_entity", type=str, default="")
     parser.add_argument("--wandb_project", type=str, default="inverse_sim")
     parser.add_argument("--wandb_iters", type=int, default=10)
     parser.add_argument("--wandb_name", type=str, required=True)

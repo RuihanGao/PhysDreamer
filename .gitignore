@@ -1,7 +1,9 @@
 *.pyc
-
+*.egg-info
 models/
 data/
 output/
 wandb/
 projects/inference/src/
+src/
+

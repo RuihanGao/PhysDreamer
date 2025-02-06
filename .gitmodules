@@ -1,0 +1,3 @@
+[submodule "projects/train/generative-models"]
+	path = projects/train/generative-models
+	url = https://github.com/Stability-AI/generative-models.git

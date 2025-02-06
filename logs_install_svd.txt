@@ -1,0 +1,512 @@
+(physdreamer) ruihang@capybara:/data/ruihan/projects/PhysDreamer/projects/train/exp_motion/train/generative-models$ pip install -r requirements/pt2.txt 
+Collecting clip@ git+https://github.com/openai/CLIP.git (from -r requirements/pt2.txt (line 3))
+  Cloning https://github.com/openai/CLIP.git to /tmp/pip-install-zfvpts0r/clip_96a0d6b5a23249ef975315a3c691e677
+  Running command git clone --filter=blob:none --quiet https://github.com/openai/CLIP.git /tmp/pip-install-zfvpts0r/clip_96a0d6b5a23249ef975315a3c691e677
+  Resolved https://github.com/openai/CLIP.git to commit dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1
+  Preparing metadata (setup.py) ... done
+Collecting black==23.7.0 (from -r requirements/pt2.txt (line 1))
+  Downloading black-23.7.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (63 kB)
+Collecting chardet==5.1.0 (from -r requirements/pt2.txt (line 2))
+  Downloading chardet-5.1.0-py3-none-any.whl.metadata (3.4 kB)
+Requirement already satisfied: einops>=0.6.1 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 4)) (0.7.0)
+Collecting fairscale>=0.4.13 (from -r requirements/pt2.txt (line 5))
+  Downloading fairscale-0.4.13.tar.gz (266 kB)
+  Installing build dependencies ... done
+  Getting requirements to build wheel ... done
+  Installing backend dependencies ... done
+  Preparing metadata (pyproject.toml) ... done
+Requirement already satisfied: fire>=0.5.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 6)) (0.5.0)
+Requirement already satisfied: fsspec>=2023.6.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 7)) (2024.12.0)
+Collecting invisible-watermark>=0.2.0 (from -r requirements/pt2.txt (line 8))
+  Downloading invisible_watermark-0.2.0-py3-none-any.whl.metadata (8.2 kB)
+Collecting kornia==0.6.9 (from -r requirements/pt2.txt (line 9))
+  Downloading kornia-0.6.9-py2.py3-none-any.whl.metadata (12 kB)
+Requirement already satisfied: matplotlib>=3.7.2 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 10)) (3.7.2)
+Collecting natsort>=8.4.0 (from -r requirements/pt2.txt (line 11))
+  Downloading natsort-8.4.0-py3-none-any.whl.metadata (21 kB)
+Collecting ninja>=1.11.1 (from -r requirements/pt2.txt (line 12))
+  Using cached ninja-1.11.1.3-py3-none-manylinux_2_12_x86_64.manylinux2010_x86_64.whl.metadata (5.3 kB)
+Collecting numpy>=1.24.4 (from -r requirements/pt2.txt (line 13))
+  Downloading numpy-2.2.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (62 kB)
+Collecting omegaconf>=2.3.0 (from -r requirements/pt2.txt (line 14))
+  Using cached omegaconf-2.3.0-py3-none-any.whl.metadata (3.9 kB)
+Collecting open-clip-torch>=2.20.0 (from -r requirements/pt2.txt (line 15))
+  Downloading open_clip_torch-2.30.0-py3-none-any.whl.metadata (31 kB)
+Requirement already satisfied: opencv-python==4.6.0.66 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 16)) (4.6.0.66)
+Requirement already satisfied: pandas>=2.0.3 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 17)) (2.2.3)
+Requirement already satisfied: pillow>=9.5.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 18)) (10.3.0)
+Collecting pudb>=2022.1.3 (from -r requirements/pt2.txt (line 19))
+  Downloading pudb-2024.1.3-py3-none-any.whl.metadata (4.4 kB)
+Collecting pytorch-lightning==2.0.1 (from -r requirements/pt2.txt (line 20))
+  Downloading pytorch_lightning-2.0.1-py3-none-any.whl.metadata (23 kB)
+Requirement already satisfied: pyyaml>=6.0.1 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 21)) (6.0.2)
+Collecting rembg (from -r requirements/pt2.txt (line 22))
+  Downloading rembg-2.0.62-py3-none-any.whl.metadata (18 kB)
+Requirement already satisfied: scipy>=1.10.1 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 23)) (1.13.0)
+Collecting streamlit>=0.73.1 (from -r requirements/pt2.txt (line 24))
+  Downloading streamlit-1.41.1-py2.py3-none-any.whl.metadata (8.5 kB)
+Collecting tensorboardx==2.6 (from -r requirements/pt2.txt (line 25))
+  Using cached tensorboardX-2.6-py2.py3-none-any.whl.metadata (5.4 kB)
+Collecting timm>=0.9.2 (from -r requirements/pt2.txt (line 26))
+  Downloading timm-1.0.14-py3-none-any.whl.metadata (50 kB)
+Collecting tokenizers==0.12.1 (from -r requirements/pt2.txt (line 27))
+  Downloading tokenizers-0.12.1-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.whl.metadata (6.5 kB)
+Requirement already satisfied: torch>=2.0.1 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 28)) (2.2.2+cu121)
+Requirement already satisfied: torchaudio>=2.0.2 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 29)) (2.2.2+cu121)
+Collecting torchdata==0.6.1 (from -r requirements/pt2.txt (line 30))
+  Downloading torchdata-0.6.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (13 kB)
+Requirement already satisfied: torchmetrics>=1.0.1 in /home/ruihang/.local/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 31)) (1.4.0.post0)
+Requirement already satisfied: torchvision>=0.15.2 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 32)) (0.17.2+cu121)
+Requirement already satisfied: tqdm>=4.65.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 33)) (4.65.0)
+Collecting transformers==4.19.1 (from -r requirements/pt2.txt (line 34))
+  Downloading transformers-4.19.1-py3-none-any.whl.metadata (73 kB)
+Collecting triton==2.0.0 (from -r requirements/pt2.txt (line 35))
+  Downloading triton-2.0.0-1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (1.0 kB)
+Collecting urllib3<1.27,>=1.25.4 (from -r requirements/pt2.txt (line 36))
+  Using cached urllib3-1.26.20-py2.py3-none-any.whl.metadata (50 kB)
+Requirement already satisfied: wandb>=0.15.6 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 37)) (0.19.5)
+Collecting webdataset>=0.2.33 (from -r requirements/pt2.txt (line 38))
+  Downloading webdataset-0.2.100-py3-none-any.whl.metadata (12 kB)
+Requirement already satisfied: wheel>=0.41.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from -r requirements/pt2.txt (line 39)) (0.45.1)
+Collecting xformers>=0.0.20 (from -r requirements/pt2.txt (line 40))
+  Downloading xformers-0.0.29.post2-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (1.0 kB)
+Collecting gradio (from -r requirements/pt2.txt (line 41))
+  Downloading gradio-5.14.0-py3-none-any.whl.metadata (16 kB)
+Collecting streamlit-keyup==0.2.0 (from -r requirements/pt2.txt (line 42))
+  Downloading streamlit_keyup-0.2.0-py3-none-any.whl.metadata (1.9 kB)
+Requirement already satisfied: click>=8.0.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from black==23.7.0->-r requirements/pt2.txt (line 1)) (8.1.8)
+Requirement already satisfied: mypy-extensions>=0.4.3 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from black==23.7.0->-r requirements/pt2.txt (line 1)) (1.0.0)
+Requirement already satisfied: packaging>=22.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from black==23.7.0->-r requirements/pt2.txt (line 1)) (24.2)
+Collecting pathspec>=0.9.0 (from black==23.7.0->-r requirements/pt2.txt (line 1))
+  Using cached pathspec-0.12.1-py3-none-any.whl.metadata (21 kB)
+Requirement already satisfied: platformdirs>=2 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from black==23.7.0->-r requirements/pt2.txt (line 1)) (4.3.6)
+Collecting tomli>=1.1.0 (from black==23.7.0->-r requirements/pt2.txt (line 1))
+  Using cached tomli-2.2.1-py3-none-any.whl.metadata (10 kB)
+Requirement already satisfied: typing-extensions>=4.0.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from pytorch-lightning==2.0.1->-r requirements/pt2.txt (line 20)) (4.12.2)
+Requirement already satisfied: lightning-utilities>=0.7.0 in /home/ruihang/.local/lib/python3.10/site-packages (from pytorch-lightning==2.0.1->-r requirements/pt2.txt (line 20)) (0.11.6)
+Collecting protobuf<4,>=3.8.0 (from tensorboardx==2.6->-r requirements/pt2.txt (line 25))
+  Using cached protobuf-3.20.3-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.whl.metadata (679 bytes)
+Requirement already satisfied: requests in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from torchdata==0.6.1->-r requirements/pt2.txt (line 30)) (2.32.3)
+Collecting torch>=2.0.1 (from -r requirements/pt2.txt (line 28))
+  Downloading torch-2.0.1-cp310-cp310-manylinux1_x86_64.whl.metadata (24 kB)
+Requirement already satisfied: filelock in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (3.17.0)
+Requirement already satisfied: sympy in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (1.13.1)
+Requirement already satisfied: networkx in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (3.3)
+Requirement already satisfied: jinja2 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (3.1.4)
+Requirement already satisfied: nvidia-cuda-nvrtc-cu11==11.7.99 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (11.7.99)
+Requirement already satisfied: nvidia-cuda-runtime-cu11==11.7.99 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (11.7.99)
+Requirement already satisfied: nvidia-cuda-cupti-cu11==11.7.101 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (11.7.101)
+Requirement already satisfied: nvidia-cudnn-cu11==8.5.0.96 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (8.5.0.96)
+Requirement already satisfied: nvidia-cublas-cu11==11.10.3.66 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (11.10.3.66)
+Requirement already satisfied: nvidia-cufft-cu11==10.9.0.58 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (10.9.0.58)
+Requirement already satisfied: nvidia-curand-cu11==10.2.10.91 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (10.2.10.91)
+Requirement already satisfied: nvidia-cusolver-cu11==11.4.0.1 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (11.4.0.1)
+Requirement already satisfied: nvidia-cusparse-cu11==11.7.4.91 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (11.7.4.91)
+Requirement already satisfied: nvidia-nccl-cu11==2.14.3 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (2.14.3)
+Requirement already satisfied: nvidia-nvtx-cu11==11.7.91 in /home/ruihang/.local/lib/python3.10/site-packages (from torch>=2.0.1->-r requirements/pt2.txt (line 28)) (11.7.91)
+Requirement already satisfied: huggingface-hub<1.0,>=0.1.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from transformers==4.19.1->-r requirements/pt2.txt (line 34)) (0.28.1)
+Requirement already satisfied: regex!=2019.12.17 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from transformers==4.19.1->-r requirements/pt2.txt (line 34)) (2024.11.6)
+Requirement already satisfied: cmake in /home/ruihang/.local/lib/python3.10/site-packages (from triton==2.0.0->-r requirements/pt2.txt (line 35)) (3.30.1)
+Requirement already satisfied: lit in /home/ruihang/.local/lib/python3.10/site-packages (from triton==2.0.0->-r requirements/pt2.txt (line 35)) (18.1.8)
+Requirement already satisfied: setuptools in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from nvidia-cublas-cu11==11.10.3.66->torch>=2.0.1->-r requirements/pt2.txt (line 28)) (75.8.0)
+Collecting ftfy (from clip@ git+https://github.com/openai/CLIP.git->-r requirements/pt2.txt (line 3))
+  Downloading ftfy-6.3.1-py3-none-any.whl.metadata (7.3 kB)
+Requirement already satisfied: six in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from fire>=0.5.0->-r requirements/pt2.txt (line 6)) (1.17.0)
+Requirement already satisfied: termcolor in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from fire>=0.5.0->-r requirements/pt2.txt (line 6)) (2.5.0)
+Collecting PyWavelets>=1.1.1 (from invisible-watermark>=0.2.0->-r requirements/pt2.txt (line 8))
+  Downloading pywavelets-1.8.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (9.0 kB)
+Requirement already satisfied: contourpy>=1.0.1 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from matplotlib>=3.7.2->-r requirements/pt2.txt (line 10)) (1.3.1)
+Requirement already satisfied: cycler>=0.10 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from matplotlib>=3.7.2->-r requirements/pt2.txt (line 10)) (0.12.1)
+Requirement already satisfied: fonttools>=4.22.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from matplotlib>=3.7.2->-r requirements/pt2.txt (line 10)) (4.55.8)
+Requirement already satisfied: kiwisolver>=1.0.1 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from matplotlib>=3.7.2->-r requirements/pt2.txt (line 10)) (1.4.8)
+Requirement already satisfied: pyparsing<3.1,>=2.3.1 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from matplotlib>=3.7.2->-r requirements/pt2.txt (line 10)) (3.0.9)
+Requirement already satisfied: python-dateutil>=2.7 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from matplotlib>=3.7.2->-r requirements/pt2.txt (line 10)) (2.9.0.post0)
+Collecting antlr4-python3-runtime==4.9.* (from omegaconf>=2.3.0->-r requirements/pt2.txt (line 14))
+  Using cached antlr4_python3_runtime-4.9.3-py3-none-any.whl
+Requirement already satisfied: safetensors in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from open-clip-torch>=2.20.0->-r requirements/pt2.txt (line 15)) (0.5.2)
+Requirement already satisfied: pytz>=2020.1 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from pandas>=2.0.3->-r requirements/pt2.txt (line 17)) (2025.1)
+Requirement already satisfied: tzdata>=2022.7 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from pandas>=2.0.3->-r requirements/pt2.txt (line 17)) (2025.1)
+Requirement already satisfied: jedi<1,>=0.18 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from pudb>=2022.1.3->-r requirements/pt2.txt (line 19)) (0.19.2)
+Requirement already satisfied: pygments>=2.7.4 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from pudb>=2022.1.3->-r requirements/pt2.txt (line 19)) (2.19.1)
+Collecting urwid-readline (from pudb>=2022.1.3->-r requirements/pt2.txt (line 19))
+  Downloading urwid_readline-0.15.1.tar.gz (9.0 kB)
+  Installing build dependencies ... done
+  Getting requirements to build wheel ... done
+  Preparing metadata (pyproject.toml) ... done
+Collecting urwid>=2.4 (from pudb>=2022.1.3->-r requirements/pt2.txt (line 19))
+  Downloading urwid-2.6.16-py3-none-any.whl.metadata (11 kB)
+Requirement already satisfied: jsonschema in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from rembg->-r requirements/pt2.txt (line 22)) (4.23.0)
+Requirement already satisfied: opencv-python-headless in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from rembg->-r requirements/pt2.txt (line 22)) (4.9.0.80)
+Collecting pooch (from rembg->-r requirements/pt2.txt (line 22))
+  Using cached pooch-1.8.2-py3-none-any.whl.metadata (10 kB)
+Collecting pymatting (from rembg->-r requirements/pt2.txt (line 22))
+  Using cached PyMatting-1.1.13-py3-none-any.whl.metadata (7.5 kB)
+Collecting scikit-image (from rembg->-r requirements/pt2.txt (line 22))
+  Using cached scikit_image-0.25.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (14 kB)
+Collecting altair<6,>=4.0 (from streamlit>=0.73.1->-r requirements/pt2.txt (line 24))
+  Using cached altair-5.5.0-py3-none-any.whl.metadata (11 kB)
+Requirement already satisfied: blinker<2,>=1.0.0 in /home/ruihang/.local/lib/python3.10/site-packages (from streamlit>=0.73.1->-r requirements/pt2.txt (line 24)) (1.8.2)
+Collecting cachetools<6,>=4.0 (from streamlit>=0.73.1->-r requirements/pt2.txt (line 24))
+  Downloading cachetools-5.5.1-py3-none-any.whl.metadata (5.4 kB)
+Collecting pyarrow>=7.0 (from streamlit>=0.73.1->-r requirements/pt2.txt (line 24))
+  Downloading pyarrow-19.0.0-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (3.3 kB)
+Collecting rich<14,>=10.14.0 (from streamlit>=0.73.1->-r requirements/pt2.txt (line 24))
+  Using cached rich-13.9.4-py3-none-any.whl.metadata (18 kB)
+Requirement already satisfied: tenacity<10,>=8.1.0 in /home/ruihang/.local/lib/python3.10/site-packages (from streamlit>=0.73.1->-r requirements/pt2.txt (line 24)) (9.0.0)
+Collecting toml<2,>=0.10.1 (from streamlit>=0.73.1->-r requirements/pt2.txt (line 24))
+  Using cached toml-0.10.2-py2.py3-none-any.whl.metadata (7.1 kB)
+Collecting watchdog<7,>=2.1.5 (from streamlit>=0.73.1->-r requirements/pt2.txt (line 24))
+  Using cached watchdog-6.0.0-py3-none-manylinux2014_x86_64.whl.metadata (44 kB)
+Requirement already satisfied: gitpython!=3.1.19,<4,>=3.0.7 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from streamlit>=0.73.1->-r requirements/pt2.txt (line 24)) (3.1.44)
+Collecting pydeck<1,>=0.8.0b4 (from streamlit>=0.73.1->-r requirements/pt2.txt (line 24))
+  Downloading pydeck-0.9.1-py2.py3-none-any.whl.metadata (4.1 kB)
+Requirement already satisfied: tornado<7,>=6.0.3 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from streamlit>=0.73.1->-r requirements/pt2.txt (line 24)) (6.1)
+INFO: pip is looking at multiple versions of torchaudio to determine which version is compatible with other requirements. This could take a while.
+Collecting torchaudio>=2.0.2 (from -r requirements/pt2.txt (line 29))
+  Using cached torchaudio-2.6.0-cp310-cp310-manylinux1_x86_64.whl.metadata (6.6 kB)
+  Downloading torchaudio-2.5.1-cp310-cp310-manylinux1_x86_64.whl.metadata (6.4 kB)
+  Downloading torchaudio-2.5.0-cp310-cp310-manylinux1_x86_64.whl.metadata (6.4 kB)
+  Downloading torchaudio-2.4.1-cp310-cp310-manylinux1_x86_64.whl.metadata (6.4 kB)
+  Downloading torchaudio-2.4.0-cp310-cp310-manylinux1_x86_64.whl.metadata (6.4 kB)
+  Downloading torchaudio-2.3.1-cp310-cp310-manylinux1_x86_64.whl.metadata (6.4 kB)
+  Downloading torchaudio-2.3.0-cp310-cp310-manylinux1_x86_64.whl.metadata (6.4 kB)
+INFO: pip is still looking at multiple versions of torchaudio to determine which version is compatible with other requirements. This could take a while.
+  Downloading torchaudio-2.2.2-cp310-cp310-manylinux1_x86_64.whl.metadata (6.4 kB)
+  Downloading torchaudio-2.2.1-cp310-cp310-manylinux1_x86_64.whl.metadata (6.4 kB)
+  Downloading torchaudio-2.2.0-cp310-cp310-manylinux1_x86_64.whl.metadata (6.4 kB)
+  Downloading torchaudio-2.1.2-cp310-cp310-manylinux1_x86_64.whl.metadata (6.4 kB)
+  Downloading torchaudio-2.1.1-cp310-cp310-manylinux1_x86_64.whl.metadata (6.4 kB)
+INFO: This is taking longer than usual. You might need to provide the dependency resolver with stricter constraints to reduce runtime. See https://pip.pypa.io/warnings/backtracking for guidance. If you want to abort this run, press Ctrl + C.
+  Downloading torchaudio-2.1.0-cp310-cp310-manylinux1_x86_64.whl.metadata (5.7 kB)
+  Downloading torchaudio-2.0.2-cp310-cp310-manylinux1_x86_64.whl.metadata (1.2 kB)
+INFO: pip is looking at multiple versions of torchvision to determine which version is compatible with other requirements. This could take a while.
+Collecting torchvision>=0.15.2 (from -r requirements/pt2.txt (line 32))
+  Using cached torchvision-0.21.0-cp310-cp310-manylinux1_x86_64.whl.metadata (6.1 kB)
+  Downloading torchvision-0.20.1-cp310-cp310-manylinux1_x86_64.whl.metadata (6.1 kB)
+  Downloading torchvision-0.20.0-cp310-cp310-manylinux1_x86_64.whl.metadata (6.1 kB)
+  Downloading torchvision-0.19.1-cp310-cp310-manylinux1_x86_64.whl.metadata (6.0 kB)
+  Using cached torchvision-0.19.0-cp310-cp310-manylinux1_x86_64.whl.metadata (6.0 kB)
+  Downloading torchvision-0.18.1-cp310-cp310-manylinux1_x86_64.whl.metadata (6.6 kB)
+  Using cached torchvision-0.18.0-cp310-cp310-manylinux1_x86_64.whl.metadata (6.6 kB)
+INFO: pip is still looking at multiple versions of torchvision to determine which version is compatible with other requirements. This could take a while.
+  Downloading torchvision-0.17.2-cp310-cp310-manylinux1_x86_64.whl.metadata (6.6 kB)
+  Downloading torchvision-0.17.1-cp310-cp310-manylinux1_x86_64.whl.metadata (6.6 kB)
+  Downloading torchvision-0.17.0-cp310-cp310-manylinux1_x86_64.whl.metadata (6.6 kB)
+  Downloading torchvision-0.16.2-cp310-cp310-manylinux1_x86_64.whl.metadata (6.6 kB)
+  Downloading torchvision-0.16.1-cp310-cp310-manylinux1_x86_64.whl.metadata (6.6 kB)
+INFO: This is taking longer than usual. You might need to provide the dependency resolver with stricter constraints to reduce runtime. See https://pip.pypa.io/warnings/backtracking for guidance. If you want to abort this run, press Ctrl + C.
+  Downloading torchvision-0.16.0-cp310-cp310-manylinux1_x86_64.whl.metadata (6.6 kB)
+  Downloading torchvision-0.15.2-cp310-cp310-manylinux1_x86_64.whl.metadata (11 kB)
+Requirement already satisfied: docker-pycreds>=0.4.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from wandb>=0.15.6->-r requirements/pt2.txt (line 37)) (0.4.0)
+Requirement already satisfied: psutil>=5.0.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from wandb>=0.15.6->-r requirements/pt2.txt (line 37)) (5.9.0)
+Requirement already satisfied: pydantic<3,>=2.6 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from wandb>=0.15.6->-r requirements/pt2.txt (line 37)) (2.10.6)
+Requirement already satisfied: sentry-sdk>=2.0.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from wandb>=0.15.6->-r requirements/pt2.txt (line 37)) (2.20.0)
+Requirement already satisfied: setproctitle in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from wandb>=0.15.6->-r requirements/pt2.txt (line 37)) (1.3.4)
+Collecting braceexpand (from webdataset>=0.2.33->-r requirements/pt2.txt (line 38))
+  Using cached braceexpand-0.1.7-py2.py3-none-any.whl.metadata (3.0 kB)
+INFO: pip is looking at multiple versions of xformers to determine which version is compatible with other requirements. This could take a while.
+Collecting xformers>=0.0.20 (from -r requirements/pt2.txt (line 40))
+  Downloading xformers-0.0.29.post1-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.29-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.28.post3-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.28.post2-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.28.post1-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.28-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.27.post2-cp310-cp310-manylinux2014_x86_64.whl.metadata (1.0 kB)
+INFO: pip is still looking at multiple versions of xformers to determine which version is compatible with other requirements. This could take a while.
+  Downloading xformers-0.0.27.post1-cp310-cp310-manylinux2014_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.27-cp310-cp310-manylinux2014_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.26.post1-cp310-cp310-manylinux2014_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.25.post1-cp310-cp310-manylinux2014_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.25-cp310-cp310-manylinux2014_x86_64.whl.metadata (1.0 kB)
+INFO: This is taking longer than usual. You might need to provide the dependency resolver with stricter constraints to reduce runtime. See https://pip.pypa.io/warnings/backtracking for guidance. If you want to abort this run, press Ctrl + C.
+  Downloading xformers-0.0.24-cp310-cp310-manylinux2014_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.23.post1-cp310-cp310-manylinux2014_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.23-cp310-cp310-manylinux2014_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.22.post7-cp310-cp310-manylinux2014_x86_64.whl.metadata (1.0 kB)
+  Downloading xformers-0.0.22-cp310-cp310-manylinux2014_x86_64.whl.metadata (1.0 kB)
+Collecting aiofiles<24.0,>=22.0 (from gradio->-r requirements/pt2.txt (line 41))
+  Using cached aiofiles-23.2.1-py3-none-any.whl.metadata (9.7 kB)
+Collecting anyio<5.0,>=3.0 (from gradio->-r requirements/pt2.txt (line 41))
+  Downloading anyio-4.8.0-py3-none-any.whl.metadata (4.6 kB)
+Collecting fastapi<1.0,>=0.115.2 (from gradio->-r requirements/pt2.txt (line 41))
+  Downloading fastapi-0.115.8-py3-none-any.whl.metadata (27 kB)
+Collecting ffmpy (from gradio->-r requirements/pt2.txt (line 41))
+  Downloading ffmpy-0.5.0-py3-none-any.whl.metadata (3.0 kB)
+Collecting gradio-client==1.7.0 (from gradio->-r requirements/pt2.txt (line 41))
+  Downloading gradio_client-1.7.0-py3-none-any.whl.metadata (7.1 kB)
+Collecting httpx>=0.24.1 (from gradio->-r requirements/pt2.txt (line 41))
+  Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting markupsafe~=2.0 (from gradio->-r requirements/pt2.txt (line 41))
+  Using cached MarkupSafe-2.1.5-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (3.0 kB)
+Collecting orjson~=3.0 (from gradio->-r requirements/pt2.txt (line 41))
+  Downloading orjson-3.10.15-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (41 kB)
+Collecting pydub (from gradio->-r requirements/pt2.txt (line 41))
+  Using cached pydub-0.25.1-py2.py3-none-any.whl.metadata (1.4 kB)
+Collecting python-multipart>=0.0.18 (from gradio->-r requirements/pt2.txt (line 41))
+  Downloading python_multipart-0.0.20-py3-none-any.whl.metadata (1.8 kB)
+Collecting ruff>=0.9.3 (from gradio->-r requirements/pt2.txt (line 41))
+  Downloading ruff-0.9.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (25 kB)
+Collecting safehttpx<0.2.0,>=0.1.6 (from gradio->-r requirements/pt2.txt (line 41))
+  Using cached safehttpx-0.1.6-py3-none-any.whl.metadata (4.2 kB)
+Collecting semantic-version~=2.0 (from gradio->-r requirements/pt2.txt (line 41))
+  Using cached semantic_version-2.10.0-py2.py3-none-any.whl.metadata (9.7 kB)
+Collecting starlette<1.0,>=0.40.0 (from gradio->-r requirements/pt2.txt (line 41))
+  Downloading starlette-0.45.3-py3-none-any.whl.metadata (6.3 kB)
+Collecting tomlkit<0.14.0,>=0.12.0 (from gradio->-r requirements/pt2.txt (line 41))
+  Using cached tomlkit-0.13.2-py3-none-any.whl.metadata (2.7 kB)
+Collecting typer<1.0,>=0.12 (from gradio->-r requirements/pt2.txt (line 41))
+  Using cached typer-0.15.1-py3-none-any.whl.metadata (15 kB)
+Collecting uvicorn>=0.14.0 (from gradio->-r requirements/pt2.txt (line 41))
+  Downloading uvicorn-0.34.0-py3-none-any.whl.metadata (6.5 kB)
+Collecting websockets<15.0,>=10.0 (from gradio-client==1.7.0->gradio->-r requirements/pt2.txt (line 41))
+  Downloading websockets-14.2-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.8 kB)
+Collecting narwhals>=1.14.2 (from altair<6,>=4.0->streamlit>=0.73.1->-r requirements/pt2.txt (line 24))
+  Downloading narwhals-1.25.0-py3-none-any.whl.metadata (10 kB)
+Requirement already satisfied: exceptiongroup>=1.0.2 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from anyio<5.0,>=3.0->gradio->-r requirements/pt2.txt (line 41)) (1.2.2)
+Requirement already satisfied: idna>=2.8 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from anyio<5.0,>=3.0->gradio->-r requirements/pt2.txt (line 41)) (3.10)
+Collecting sniffio>=1.1 (from anyio<5.0,>=3.0->gradio->-r requirements/pt2.txt (line 41))
+  Using cached sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+Requirement already satisfied: aiohttp!=4.0.0a0,!=4.0.0a1 in /home/ruihang/.local/lib/python3.10/site-packages (from fsspec[http]>2021.06.0->pytorch-lightning==2.0.1->-r requirements/pt2.txt (line 20)) (3.10.0)
+Requirement already satisfied: gitdb<5,>=4.0.1 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from gitpython!=3.1.19,<4,>=3.0.7->streamlit>=0.73.1->-r requirements/pt2.txt (line 24)) (4.0.12)
+Requirement already satisfied: certifi in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from httpx>=0.24.1->gradio->-r requirements/pt2.txt (line 41)) (2025.1.31)
+Collecting httpcore==1.* (from httpx>=0.24.1->gradio->-r requirements/pt2.txt (line 41))
+  Using cached httpcore-1.0.7-py3-none-any.whl.metadata (21 kB)
+Collecting h11<0.15,>=0.13 (from httpcore==1.*->httpx>=0.24.1->gradio->-r requirements/pt2.txt (line 41))
+  Using cached h11-0.14.0-py3-none-any.whl.metadata (8.2 kB)
+Requirement already satisfied: parso<0.9.0,>=0.8.4 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from jedi<1,>=0.18->pudb>=2022.1.3->-r requirements/pt2.txt (line 19)) (0.8.4)
+Requirement already satisfied: attrs>=22.2.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from jsonschema->rembg->-r requirements/pt2.txt (line 22)) (25.1.0)
+Requirement already satisfied: jsonschema-specifications>=2023.03.6 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from jsonschema->rembg->-r requirements/pt2.txt (line 22)) (2024.10.1)
+Requirement already satisfied: referencing>=0.28.4 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from jsonschema->rembg->-r requirements/pt2.txt (line 22)) (0.36.2)
+Requirement already satisfied: rpds-py>=0.7.1 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from jsonschema->rembg->-r requirements/pt2.txt (line 22)) (0.22.3)
+Requirement already satisfied: annotated-types>=0.6.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from pydantic<3,>=2.6->wandb>=0.15.6->-r requirements/pt2.txt (line 37)) (0.7.0)
+Requirement already satisfied: pydantic-core==2.27.2 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from pydantic<3,>=2.6->wandb>=0.15.6->-r requirements/pt2.txt (line 37)) (2.27.2)
+Requirement already satisfied: charset-normalizer<4,>=2 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from requests->torchdata==0.6.1->-r requirements/pt2.txt (line 30)) (3.4.1)
+Collecting markdown-it-py>=2.2.0 (from rich<14,>=10.14.0->streamlit>=0.73.1->-r requirements/pt2.txt (line 24))
+  Using cached markdown_it_py-3.0.0-py3-none-any.whl.metadata (6.9 kB)
+Collecting shellingham>=1.3.0 (from typer<1.0,>=0.12->gradio->-r requirements/pt2.txt (line 41))
+  Using cached shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+Requirement already satisfied: wcwidth in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from urwid>=2.4->pudb>=2022.1.3->-r requirements/pt2.txt (line 19)) (0.2.13)
+Collecting numba!=0.49.0 (from pymatting->rembg->-r requirements/pt2.txt (line 22))
+  Using cached numba-0.61.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.8 kB)
+Requirement already satisfied: imageio!=2.35.0,>=2.33 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from scikit-image->rembg->-r requirements/pt2.txt (line 22)) (2.34.0)
+Collecting tifffile>=2022.8.12 (from scikit-image->rembg->-r requirements/pt2.txt (line 22))
+  Using cached tifffile-2025.1.10-py3-none-any.whl.metadata (31 kB)
+Collecting lazy-loader>=0.4 (from scikit-image->rembg->-r requirements/pt2.txt (line 22))
+  Using cached lazy_loader-0.4-py3-none-any.whl.metadata (7.6 kB)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from sympy->torch>=2.0.1->-r requirements/pt2.txt (line 28)) (1.3.0)
+Requirement already satisfied: aiohappyeyeballs>=2.3.0 in /home/ruihang/.local/lib/python3.10/site-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]>2021.06.0->pytorch-lightning==2.0.1->-r requirements/pt2.txt (line 20)) (2.3.4)
+Requirement already satisfied: aiosignal>=1.1.2 in /home/ruihang/.local/lib/python3.10/site-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]>2021.06.0->pytorch-lightning==2.0.1->-r requirements/pt2.txt (line 20)) (1.3.1)
+Requirement already satisfied: frozenlist>=1.1.1 in /home/ruihang/.local/lib/python3.10/site-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]>2021.06.0->pytorch-lightning==2.0.1->-r requirements/pt2.txt (line 20)) (1.4.1)
+Requirement already satisfied: multidict<7.0,>=4.5 in /home/ruihang/.local/lib/python3.10/site-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]>2021.06.0->pytorch-lightning==2.0.1->-r requirements/pt2.txt (line 20)) (6.0.5)
+Requirement already satisfied: yarl<2.0,>=1.0 in /home/ruihang/.local/lib/python3.10/site-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]>2021.06.0->pytorch-lightning==2.0.1->-r requirements/pt2.txt (line 20)) (1.9.4)
+Requirement already satisfied: async-timeout<5.0,>=4.0 in /home/ruihang/.local/lib/python3.10/site-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]>2021.06.0->pytorch-lightning==2.0.1->-r requirements/pt2.txt (line 20)) (4.0.3)
+Requirement already satisfied: smmap<6,>=3.0.1 in /data/ruihan/anaconda3/envs/physdreamer/lib/python3.10/site-packages (from gitdb<5,>=4.0.1->gitpython!=3.1.19,<4,>=3.0.7->streamlit>=0.73.1->-r requirements/pt2.txt (line 24)) (5.0.2)
+Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich<14,>=10.14.0->streamlit>=0.73.1->-r requirements/pt2.txt (line 24))
+  Using cached mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+Collecting llvmlite<0.45,>=0.44.0dev0 (from numba!=0.49.0->pymatting->rembg->-r requirements/pt2.txt (line 22))
+  Using cached llvmlite-0.44.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.8 kB)
+Collecting numpy>=1.24.4 (from -r requirements/pt2.txt (line 13))
+  Downloading numpy-2.1.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (62 kB)
+Downloading black-23.7.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 33.9 MB/s eta 0:00:00
+Downloading chardet-5.1.0-py3-none-any.whl (199 kB)
+Downloading kornia-0.6.9-py2.py3-none-any.whl (569 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 569.1/569.1 kB 61.2 MB/s eta 0:00:00
+Downloading pytorch_lightning-2.0.1-py3-none-any.whl (716 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 716.4/716.4 kB 58.1 MB/s eta 0:00:00
+Downloading tensorboardX-2.6-py2.py3-none-any.whl (114 kB)
+Downloading tokenizers-0.12.1-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (6.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.6/6.6 MB 65.0 MB/s eta 0:00:00
+Downloading torchdata-0.6.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.6/4.6 MB 60.0 MB/s eta 0:00:00
+Downloading torch-2.0.1-cp310-cp310-manylinux1_x86_64.whl (619.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 619.9/619.9 MB 31.7 MB/s eta 0:00:00
+Downloading transformers-4.19.1-py3-none-any.whl (4.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.2/4.2 MB 28.9 MB/s eta 0:00:00
+Downloading triton-2.0.0-1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (63.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 63.3/63.3 MB 30.3 MB/s eta 0:00:00
+Downloading streamlit_keyup-0.2.0-py3-none-any.whl (7.4 kB)
+Downloading invisible_watermark-0.2.0-py3-none-any.whl (1.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.6/1.6 MB 29.3 MB/s eta 0:00:00
+Downloading natsort-8.4.0-py3-none-any.whl (38 kB)
+Using cached ninja-1.11.1.3-py3-none-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (422 kB)
+Using cached omegaconf-2.3.0-py3-none-any.whl (79 kB)
+Downloading open_clip_torch-2.30.0-py3-none-any.whl (1.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.5/1.5 MB 28.0 MB/s eta 0:00:00
+Downloading pudb-2024.1.3-py3-none-any.whl (87 kB)
+Downloading rembg-2.0.62-py3-none-any.whl (40 kB)
+Downloading streamlit-1.41.1-py2.py3-none-any.whl (9.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 9.1/9.1 MB 32.0 MB/s eta 0:00:00
+Downloading timm-1.0.14-py3-none-any.whl (2.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.4/2.4 MB 23.7 MB/s eta 0:00:00
+Downloading torchaudio-2.0.2-cp310-cp310-manylinux1_x86_64.whl (4.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.4/4.4 MB 24.1 MB/s eta 0:00:00
+Downloading torchvision-0.15.2-cp310-cp310-manylinux1_x86_64.whl (6.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.0/6.0 MB 26.9 MB/s eta 0:00:00
+Using cached urllib3-1.26.20-py2.py3-none-any.whl (144 kB)
+Downloading webdataset-0.2.100-py3-none-any.whl (74 kB)
+Downloading xformers-0.0.22-cp310-cp310-manylinux2014_x86_64.whl (211.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 211.6/211.6 MB 30.1 MB/s eta 0:00:00
+Downloading gradio-5.14.0-py3-none-any.whl (57.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.7/57.7 MB 26.1 MB/s eta 0:00:00
+Downloading gradio_client-1.7.0-py3-none-any.whl (321 kB)
+Using cached aiofiles-23.2.1-py3-none-any.whl (15 kB)
+Using cached altair-5.5.0-py3-none-any.whl (731 kB)
+Downloading anyio-4.8.0-py3-none-any.whl (96 kB)
+Downloading cachetools-5.5.1-py3-none-any.whl (9.5 kB)
+Downloading fastapi-0.115.8-py3-none-any.whl (94 kB)
+Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+Using cached httpcore-1.0.7-py3-none-any.whl (78 kB)
+Using cached MarkupSafe-2.1.5-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (25 kB)
+Downloading orjson-3.10.15-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (130 kB)
+Using cached pathspec-0.12.1-py3-none-any.whl (31 kB)
+Downloading protobuf-3.20.3-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (1.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 24.2 MB/s eta 0:00:00
+Downloading pyarrow-19.0.0-cp310-cp310-manylinux_2_28_x86_64.whl (42.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 42.1/42.1 MB 29.9 MB/s eta 0:00:00
+Downloading pydeck-0.9.1-py2.py3-none-any.whl (6.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.9/6.9 MB 27.7 MB/s eta 0:00:00
+Downloading python_multipart-0.0.20-py3-none-any.whl (24 kB)
+Downloading pywavelets-1.8.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 26.6 MB/s eta 0:00:00
+Using cached rich-13.9.4-py3-none-any.whl (242 kB)
+Downloading ruff-0.9.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (12.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.4/12.4 MB 30.3 MB/s eta 0:00:00
+Using cached safehttpx-0.1.6-py3-none-any.whl (8.7 kB)
+Using cached semantic_version-2.10.0-py2.py3-none-any.whl (15 kB)
+Downloading starlette-0.45.3-py3-none-any.whl (71 kB)
+Downloading toml-0.10.2-py2.py3-none-any.whl (16 kB)
+Using cached tomli-2.2.1-py3-none-any.whl (14 kB)
+Using cached tomlkit-0.13.2-py3-none-any.whl (37 kB)
+Using cached typer-0.15.1-py3-none-any.whl (44 kB)
+Downloading urwid-2.6.16-py3-none-any.whl (297 kB)
+Downloading uvicorn-0.34.0-py3-none-any.whl (62 kB)
+Using cached watchdog-6.0.0-py3-none-manylinux2014_x86_64.whl (79 kB)
+Downloading braceexpand-0.1.7-py2.py3-none-any.whl (5.9 kB)
+Downloading ffmpy-0.5.0-py3-none-any.whl (6.0 kB)
+Downloading ftfy-6.3.1-py3-none-any.whl (44 kB)
+Using cached pooch-1.8.2-py3-none-any.whl (64 kB)
+Using cached pydub-0.25.1-py2.py3-none-any.whl (32 kB)
+Using cached PyMatting-1.1.13-py3-none-any.whl (54 kB)
+Using cached scikit_image-0.25.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (14.8 MB)
+Using cached h11-0.14.0-py3-none-any.whl (58 kB)
+Using cached lazy_loader-0.4-py3-none-any.whl (12 kB)
+Using cached markdown_it_py-3.0.0-py3-none-any.whl (87 kB)
+Downloading narwhals-1.25.0-py3-none-any.whl (313 kB)
+Using cached numba-0.61.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (3.8 MB)
+Downloading numpy-2.1.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (16.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.3/16.3 MB 28.6 MB/s eta 0:00:00
+Using cached shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+Using cached sniffio-1.3.1-py3-none-any.whl (10 kB)
+Using cached tifffile-2025.1.10-py3-none-any.whl (227 kB)
+Downloading websockets-14.2-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (169 kB)
+Using cached llvmlite-0.44.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (42.4 MB)
+Using cached mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+Building wheels for collected packages: clip, fairscale, urwid-readline
+  Building wheel for clip (setup.py) ... done
+  Created wheel for clip: filename=clip-1.0-py3-none-any.whl size=1369515 sha256=d0e51f7637209e3d419214e2e61a61a1ca2c59d8068a59fd0cc18d2093de103c
+  Stored in directory: /tmp/pip-ephem-wheel-cache-idjzkl0m/wheels/da/2b/4c/d6691fa9597aac8bb85d2ac13b112deb897d5b50f5ad9a37e4
+  Building wheel for fairscale (pyproject.toml) ... done
+  Created wheel for fairscale: filename=fairscale-0.4.13-py3-none-any.whl size=332156 sha256=ef09c34b94d2587c620fa96090f390477e7f7d43174825f13aefe33f109b0217
+  Stored in directory: /home/ruihang/.cache/pip/wheels/78/a4/c0/fb0a7ef03cff161611c3fa40c6cf898f76e58ec421b88e8cb3
+  Building wheel for urwid-readline (pyproject.toml) ... done
+  Created wheel for urwid-readline: filename=urwid_readline-0.15.1-py3-none-any.whl size=9271 sha256=f891e2790cc7f102b777acf50887d45357771ba55b02f0c3089498a10a22faf5
+  Stored in directory: /home/ruihang/.cache/pip/wheels/1b/f1/20/cc52666601adcf141b250d12d3eda3e74b43ad2b7632db9ddf
+Successfully built clip fairscale urwid-readline
+Installing collected packages: tokenizers, pydub, braceexpand, antlr4-python3-runtime, websockets, watchdog, urwid, urllib3, tomlkit, tomli, toml, sniffio, shellingham, semantic-version, ruff, python-multipart, pyarrow, protobuf, pathspec, orjson, omegaconf, numpy, ninja, natsort, narwhals, mdurl, markupsafe, llvmlite, lazy-loader, h11, ftfy, ffmpy, chardet, cachetools, aiofiles, webdataset, uvicorn, urwid-readline, tifffile, tensorboardx, PyWavelets, numba, markdown-it-py, httpcore, black, anyio, starlette, scikit-image, rich, pymatting, pydeck, pudb, pooch, httpx, typer, transformers, safehttpx, rembg, gradio-client, fastapi, altair, streamlit, gradio, streamlit-keyup, triton, torch, torchvision, timm, xformers, torchdata, torchaudio, pytorch-lightning, open-clip-torch, kornia, invisible-watermark, fairscale, clip
+  Attempting uninstall: tokenizers
+    Found existing installation: tokenizers 0.21.0
+    Uninstalling tokenizers-0.21.0:
+      Successfully uninstalled tokenizers-0.21.0
+  Attempting uninstall: antlr4-python3-runtime
+    Found existing installation: antlr4-python3-runtime 4.8
+    Uninstalling antlr4-python3-runtime-4.8:
+      Successfully uninstalled antlr4-python3-runtime-4.8
+  Attempting uninstall: urllib3
+    Found existing installation: urllib3 2.3.0
+    Uninstalling urllib3-2.3.0:
+      Successfully uninstalled urllib3-2.3.0
+  Attempting uninstall: protobuf
+    Found existing installation: protobuf 5.29.3
+    Uninstalling protobuf-5.29.3:
+      Successfully uninstalled protobuf-5.29.3
+  Attempting uninstall: omegaconf
+    Found existing installation: omegaconf 2.1.1
+    Uninstalling omegaconf-2.1.1:
+      Successfully uninstalled omegaconf-2.1.1
+  Attempting uninstall: numpy
+    Found existing installation: numpy 1.24.2
+    Uninstalling numpy-1.24.2:
+      Successfully uninstalled numpy-1.24.2
+  Attempting uninstall: markupsafe
+    Found existing installation: MarkupSafe 3.0.2
+    Uninstalling MarkupSafe-3.0.2:
+      Successfully uninstalled MarkupSafe-3.0.2
+  Attempting uninstall: transformers
+    Found existing installation: transformers 4.48.2
+    Uninstalling transformers-4.48.2:
+      Successfully uninstalled transformers-4.48.2
+  Attempting uninstall: triton
+    Found existing installation: triton 2.2.0
+    Uninstalling triton-2.2.0:
+      Successfully uninstalled triton-2.2.0
+  Attempting uninstall: torch
+    Found existing installation: torch 2.2.2+cu121
+    Uninstalling torch-2.2.2+cu121:
+      Successfully uninstalled torch-2.2.2+cu121
+  Attempting uninstall: torchvision
+    Found existing installation: torchvision 0.17.2+cu121
+    Uninstalling torchvision-0.17.2+cu121:
+      Successfully uninstalled torchvision-0.17.2+cu121
+  Attempting uninstall: torchaudio
+    Found existing installation: torchaudio 2.2.2+cu121
+    Uninstalling torchaudio-2.2.2+cu121:
+      Successfully uninstalled torchaudio-2.2.2+cu121
+ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
+scikit-learn 1.3.2 requires numpy<2.0,>=1.17.3, but you have numpy 2.1.3 which is incompatible.
+Successfully installed PyWavelets-1.8.0 aiofiles-23.2.1 altair-5.5.0 antlr4-python3-runtime-4.9.3 anyio-4.8.0 black-23.7.0 braceexpand-0.1.7 cachetools-5.5.1 chardet-5.1.0 clip-1.0 fairscale-0.4.13 fastapi-0.115.8 ffmpy-0.5.0 ftfy-6.3.1 gradio-5.14.0 gradio-client-1.7.0 h11-0.14.0 httpcore-1.0.7 httpx-0.28.1 invisible-watermark-0.2.0 kornia-0.6.9 lazy-loader-0.4 llvmlite-0.44.0 markdown-it-py-3.0.0 markupsafe-2.1.5 mdurl-0.1.2 narwhals-1.25.0 natsort-8.4.0 ninja-1.11.1.3 numba-0.61.0 numpy-2.1.3 omegaconf-2.3.0 open-clip-torch-2.30.0 orjson-3.10.15 pathspec-0.12.1 pooch-1.8.2 protobuf-3.20.3 pudb-2024.1.3 pyarrow-19.0.0 pydeck-0.9.1 pydub-0.25.1 pymatting-1.1.13 python-multipart-0.0.20 pytorch-lightning-2.0.1 rembg-2.0.62 rich-13.9.4 ruff-0.9.4 safehttpx-0.1.6 scikit-image-0.25.1 semantic-version-2.10.0 shellingham-1.5.4 sniffio-1.3.1 starlette-0.45.3 streamlit-1.41.1 streamlit-keyup-0.2.0 tensorboardx-2.6 tifffile-2025.1.10 timm-1.0.14 tokenizers-0.12.1 toml-0.10.2 tomli-2.2.1 tomlkit-0.13.2 torch-2.0.1 torchaudio-2.0.2 torchdata-0.6.1 torchvision-0.15.2 transformers-4.19.1 triton-2.0.0 typer-0.15.1 urllib3-1.26.20 urwid-2.6.16 urwid-readline-0.15.1 uvicorn-0.34.0 watchdog-6.0.0 webdataset-0.2.100 websockets-14.2 xformers-0.0.22
+
+
+
+
+
+(physdreamer) ruihang@capybara:/data/ruihan/projects/PhysDreamer/projects/train/exp_motion/train/generative-models$ pip install .
+Processing /data/ruihan/projects/PhysDreamer/projects/train/generative-models
+  Installing build dependencies ... done
+  Getting requirements to build wheel ... done
+  Preparing metadata (pyproject.toml) ... done
+Building wheels for collected packages: sgm
+  Building wheel for sgm (pyproject.toml) ... done
+  Created wheel for sgm: filename=sgm-0.1.0-py3-none-any.whl size=126611 sha256=360b9b3a4450fc044a86ee790e2b88cdbe3973d565c2b05c6f177aef245eec98
+  Stored in directory: /home/ruihang/.cache/pip/wheels/4e/4a/a4/bad8d6eb56c74b63ea897923f223fa78b4f45d9b8c09753cb7
+Successfully built sgm
+Installing collected packages: sgm
+Successfully installed sgm-0.1.0
+
+
+>>>>> incompatible numpy version leads to conflicts.
+Solution: after installing PhysDreamer environment, directly install sgm module via
+```
+(DG) ruihang@capybara:/data/ruihan/projects/PhysDreamer/projects/train$ conda create -n physdreamer python=3.10
+(DG) ruihang@capybara:/data/ruihan/projects/PhysDreamer/projects/train$ conda activate physdreamer
+(physdreamer) ruihang@capybara:/data/ruihan/projects/PhysDreamer/projects/train$ cd ../..
+(physdreamer) ruihang@capybara:/data/ruihan/projects/PhysDreamer$ pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cu121
+(physdreamer) ruihang@capybara:/data/ruihan/projects/PhysDreamer$ pip install git+https://github.com/graphdeco-inria/diff-gaussian-rasterization
+(physdreamer) ruihang@capybara:/data/ruihan/projects/PhysDreamer$ pip install -e git+https://gitlab.inria.fr/bkerbl/simple-knn.git@44f764299fa305faf6ec5ebd99939e0508331503#egg=simple_knn&subdirectory=../../../submodules/simple-knn
+(physdreamer) ruihang@capybara:/data/ruihan/projects/PhysDreamer$ pip install -r requirements.txt
+(physdreamer) ruihang@capybara:/data/ruihan/projects/PhysDreamer$ python setup.py install
+(physdreamer) ruihang@capybara:/data/ruihan/projects/PhysDreamer/projects/train$ cd generative-models/
+(physdreamer) ruihang@capybara:/data/ruihan/projects/PhysDreamer/projects/train/generative-models$ pip install .
+Processing /data/ruihan/projects/PhysDreamer/projects/train/generative-models
+  Installing build dependencies ... done
+  Getting requirements to build wheel ... done
+  Preparing metadata (pyproject.toml) ... done
+Building wheels for collected packages: sgm
+  Building wheel for sgm (pyproject.toml) ... done
+  Created wheel for sgm: filename=sgm-0.1.0-py3-none-any.whl size=126611 sha256=360b9b3a4450fc044a86ee790e2b88cdbe3973d565c2b05c6f177aef245eec98
+  Stored in directory: /home/ruihang/.cache/pip/wheels/4e/4a/a4/bad8d6eb56c74b63ea897923f223fa78b4f45d9b8c09753cb7
+Successfully built sgm
+Installing collected packages: sgm
+Successfully installed sgm-0.1.0
+```

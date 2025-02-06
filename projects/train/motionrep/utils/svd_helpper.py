@@ -8,9 +8,9 @@ import os
 from omegaconf import ListConfig, OmegaConf
 from safetensors.torch import load_file as load_safetensors
 
-from sgm.inference.helpers import embed_watermark
-from sgm.modules.diffusionmodules.guiders import LinearPredictionGuider, VanillaCFG
-from sgm.util import append_dims, default, instantiate_from_config
+# from sgm.inference.helpers import embed_watermark
+# from sgm.modules.diffusionmodules.guiders import LinearPredictionGuider, VanillaCFG
+from sgm.util import instantiate_from_config #  append_dims, default,
 import math
 from einops import repeat
 

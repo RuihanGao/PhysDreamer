@@ -33,4 +33,12 @@ tqdm==4.65.0
 trimesh==4.0.8
 warp_lang==0.10.1
 xatlas==0.0.9
+wandb
 # pip install git+https://github.com/graphdeco-inria/diff-gaussian-rasterization
+
+
+# for sgm compatibility
+# pytorch-lightning==2.4.0
+# kornia==0.8.0 
+# open-clip-torch==2.30.0
+# transformers==4.19.1
