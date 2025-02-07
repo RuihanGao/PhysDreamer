@@ -254,7 +254,6 @@ class Trainer:
         if args.checkpoint_path == "None":
             args.checkpoint_path = None
         if args.checkpoint_path is not None:
-
             if args.video_dir_name in model_dict:
                 args.checkpoint_path = model_dict[args.video_dir_name]
             self.load(args.checkpoint_path)
@@ -711,8 +710,10 @@ class Trainer:
         cam = data["cam"][0]
 
         gt_videos = data["video_clip"][0, 1 : self.num_frames, ...]
+        print(f"check video data: video_clip {data["video_clip"].shape}, gt_videos {gt_videos.shape}")
 
-        window_size = int(self.window_size_schduler.compute_state(self.step)[0])
+        window_size = int(self.window_size_schduler.compute_state(self.step)[0]) # number of frames to run simulation in this training iteration
+        print(f"window_size {window_size}") 
         stop_velo_opt_thres = 15
         do_velo_opt = not self.freeze_velo
         if not do_velo_opt:
@@ -763,19 +764,20 @@ class Trainer:
         num_particles = particle_pos.shape[0]
 
         delta_time = 1.0 / 30  # 30 fps
-        substep_size = delta_time / self.args.substep
+        substep_size = delta_time / self.args.substep # 1/30/768 = 4.34e-5
         num_substeps = int(delta_time / substep_size)
 
         checkpoint_steps = self.args.checkpoint_steps
 
         start_time_idx = max(0, window_size - self.args.compute_window)
+        print(f"start_time_idx {start_time_idx}")
 
         temporal_stride = self.args.stride
 
         if temporal_stride < 0 or temporal_stride > window_size:
             temporal_stride = window_size
 
-        for start_time_idx in range(0, window_size, temporal_stride):
+        for start_time_idx in range(0, window_size, temporal_stride): 
 
             end_time_idx = min(start_time_idx + temporal_stride, window_size)
             # end_time_idx-start_time_idx => frame per stage
@@ -943,6 +945,7 @@ class Trainer:
                 self.velo_optimizer.zero_grad()
                 self.velo_scheduler.step()
             with torch.no_grad():
+                # TODO: check the clipping range. make sure it is consistent with the scale of parameter during material modeling
                 self.E_nu_list[0].data.clamp_(1e-1, 1e8)
                 self.E_nu_list[1].data.clamp_(1e-2, 0.449)
         self.scheduler.step()
@@ -1465,7 +1468,7 @@ def parse_args():
     parser.add_argument("--grid_size", type=int, default=64)
     parser.add_argument("--sim_res", type=int, default=8)
     parser.add_argument("--sim_output_dim", type=int, default=1)
-    parser.add_argument("--substep", type=int, default=768)
+    parser.add_argument("--substep", type=int, default=768) # 1s / 30 fps / 768 substeps = 4.34e-5 s/substep
     parser.add_argument("--loss_decay", type=float, default=1.0)
     parser.add_argument("--start_window_size", type=int, default=6)
     parser.add_argument("--compute_window", type=int, default=1)
