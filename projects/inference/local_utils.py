@@ -688,7 +688,17 @@ def add_constant_force(
 
     print(apply_force_mask.shape, apply_force_mask.sum().item(), "apply force mask")
 
-    mpm_sovler.add_impulse_on_particles_with_mask(
+    # mpm_sovler.add_impulse_on_particles_with_mask(
+    #     mpm_state,
+    #     force,
+    #     dt,
+    #     apply_force_mask,
+    #     start_time=start_time,
+    #     end_time=end_time,
+    #     device=device,
+    # )
+
+    mpm_sovler.add_impulse_on_particles_with_mask_differentiable(
         mpm_state,
         force,
         dt,
@@ -697,6 +707,7 @@ def add_constant_force(
         end_time=end_time,
         device=device,
     )
+
 
 
 @torch.no_grad()
@@ -835,6 +846,7 @@ def render_gaussian_seq_w_mask_cam_seq_with_force_with_disp(
     pts_index,
     force,
     force_steps,
+    hide_force=False,
 ):
 
     force_in_2d_scale = 80  # unit as pixel
@@ -870,7 +882,7 @@ def render_gaussian_seq_w_mask_cam_seq_with_force_with_disp(
         img = img.detach().contiguous().cpu().numpy().transpose(1, 2, 0)
         img = np.clip((img * 255), 0, 255).astype(np.uint8).copy()
 
-        if i < force_steps:
+        if i < force_steps and not hide_force:
             center_point = gaussians._xyz[pts_index]
             two_points = torch.stack([center_point, center_point + force], dim=0)
 

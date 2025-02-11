@@ -8,6 +8,7 @@ from mpm_data_structure import *
 from mpm_utils import *
 from typing import Optional, Union, Sequence, Any, Tuple
 from jaxtyping import Float, Int, Shaped
+import pdb
 
 
 class MPMWARPDiff(object):
@@ -30,6 +31,7 @@ class MPMWARPDiff(object):
 
         self.tailored_struct_for_bc = MPMtailoredStruct()
         self.pre_p2g_operations = []
+        self.p2g_extra_operations = []
         self.impulse_params = []
 
         self.particle_velocity_modifiers = []
@@ -190,6 +192,8 @@ class MPMWARPDiff(object):
 
         # apply pre-p2g operations on particles
         # apply impulse force on particles..
+        # print(f"before pre_p2g_operations, particle_v: {np.isnan(mpm_state.particle_v.numpy()).any()}, max {mpm_state.particle_v.numpy().max()}")
+        # print(f"len(self.pre_p2g_operations) {len(self.pre_p2g_operations)}")
         for k in range(len(self.pre_p2g_operations)):
             wp.launch(
                 kernel=self.pre_p2g_operations[k],
@@ -197,6 +201,7 @@ class MPMWARPDiff(object):
                 inputs=[self.time, dt, mpm_state, self.impulse_params[k]],
                 device=device,
             )
+        # print(f"after pre_p2g_operations, particle_v: {np.isnan(mpm_state.particle_v.numpy()).any()}, max {mpm_state.particle_v.numpy().max()}")
 
         # apply dirichlet particle v modifier
         for k in range(len(self.particle_velocity_modifiers)):
@@ -210,6 +215,7 @@ class MPMWARPDiff(object):
                 ],
                 device=device,
             )
+
 
         # compute stress = stress(returnMap(F_trial))
         # F_trail => F                    # TODO: this is overite..
@@ -229,6 +235,7 @@ class MPMWARPDiff(object):
             )  # F and stress are updated
 
         # p2g
+        # print(f"before p2g_apic_with_stress, grid_v_in: {np.isnan(mpm_state.grid_v_in.numpy()).any()}, max {mpm_state.grid_v_in.numpy().max()}")
         with wp.ScopedTimer(
             "p2g",
             synchronize=True,
@@ -241,6 +248,16 @@ class MPMWARPDiff(object):
                 inputs=[mpm_state, mpm_model, dt],
                 device=device,
             )  # apply p2g'
+        # print(f"after p2g_apic_with_stress, grid_v_in: {np.isnan(mpm_state.grid_v_in.numpy()).any()}, max {mpm_state.grid_v_in.numpy().max()}")
+
+        for k in range(len(self.p2g_extra_operations)):
+            # run p2g_apply_impulse to transfer particle impulse onto the grid when impulse force is applied
+            wp.launch(
+                kernel=self.p2g_extra_operations[k],
+                dim=self.n_particles,
+                inputs=[self.time, dt, mpm_state, self.impulse_params[k], self.impulse_params[k]],
+                device=device,
+            )
 
         # grid update
         with wp.ScopedTimer(
@@ -252,6 +269,7 @@ class MPMWARPDiff(object):
                 inputs=[mpm_state, mpm_model, dt],
                 device=device,
             )
+        # print(f"after grid_normalization_and_gravity, grid_v_out: {np.isnan(mpm_state.grid_v_out.numpy()).any()}, max {mpm_state.grid_v_out.numpy().max()}")
 
         if mpm_model.grid_v_damping_scale < 1.0:
             wp.launch(
@@ -260,6 +278,7 @@ class MPMWARPDiff(object):
                 inputs=[mpm_state, mpm_model.grid_v_damping_scale],
                 device=device,
             )
+        
 
         # apply BC on grid, collide
         with wp.ScopedTimer(
@@ -292,6 +311,9 @@ class MPMWARPDiff(object):
                 device=device,
             )  # x, v, C, F_trial are updated
 
+        # print(f"after g2p_differentiable, state particle_v: {np.isnan(mpm_state.particle_v.numpy()).any()}, next_state particle_v:  {np.isnan(next_state.particle_v.numpy()).any()}")
+        # print(f"check p2g2p_differentiable")
+        # pdb.set_trace()
         self.time = self.time + dt
 
     def p2g2p(self, mpm_model, mpm_state, step, dt, device="cuda:0"):
@@ -1080,3 +1102,43 @@ class MPMWARPDiff(object):
                     state.particle_v[p] = state.particle_v[p] + impulse * dt
 
         self.pre_p2g_operations.append(apply_force)
+
+
+    def add_impulse_on_particles_with_mask_differentiable(
+        self,
+        mpm_state,
+        force,
+        dt,
+        particle_mask,  # 1 for selected particles, 0 for others
+        point=[1, 1, 1],
+        size=[1, 1, 1],
+        end_time=1,
+        start_time=0.0,
+        device="cuda:0",
+    ):
+        assert (
+            len(particle_mask) == self.n_particles
+        ), "mask should have n_particles elements"
+        impulse_param = Impulse_modifier()
+        impulse_param.start_time = start_time
+        impulse_param.end_time = end_time
+        impulse_param.mask = wp.from_torch(particle_mask)
+
+        impulse_param.point = wp.vec3(point[0], point[1], point[2])
+        impulse_param.size = wp.vec3(size[0], size[1], size[2])
+
+        impulse_param.force = wp.vec3(
+            force[0],
+            force[1],
+            force[2],
+        )
+
+        wp.launch(
+            kernel=selection_add_impulse_on_particles,
+            dim=self.n_particles,
+            inputs=[mpm_state, impulse_param],
+            device=device,
+        )
+
+        self.impulse_params.append(impulse_param)
+        self.p2g_extra_operations.append(p2g_apply_impulse)

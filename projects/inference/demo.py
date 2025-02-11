@@ -58,6 +58,7 @@ from local_utils import (
 )
 from config_demo import DemoParams
 from physdreamer.utils.io_utils import save_video_mediapy
+import pdb
 
 
 logger = get_logger(__name__, log_level="INFO")
@@ -128,6 +129,8 @@ class Trainer:
             args.point_id,
             args.cam_id,
             args.apply_force,
+            args.hide_force,
+            args.postfix,
         )
         self.args.dataset_dir = demo_cfg["dataset_dir"]
         self.demo_cfg = demo_cfg
@@ -182,6 +185,8 @@ class Trainer:
         self.sim_fields, self.velo_fields = accelerator.prepare(
             self.sim_fields, self.velo_fields
         )
+        self.hide_force = args.hide_force # option to hide force rendering to generate driving video for training
+        
 
     def init_trainable_params(
         self,
@@ -343,6 +348,7 @@ class Trainer:
             num_particles, n_grid=grid_size, grid_lim=1.0, device=device
         )
         mpm_solver.set_parameters_dict(mpm_model, mpm_state, material_params)
+
 
         self.mpm_state, self.mpm_model, self.mpm_solver = (
             mpm_state,
@@ -634,6 +640,11 @@ class Trainer:
         ) = self.get_simulation_input(device)
 
         poisson = self.E_nu_list[1].detach().clone()  # override poisson
+        # print(f"check poisson: {poisson.shape}")  # [], 0.2646
+        # print(f"check trainer.poison_ratio: {self.poisson_ratio.shape}") # [13356], uniformly 0.3
+        # print(f"check youngs_modulus: {youngs_modulus_.shape}") # [13356], loaded from material field, nonuniform
+        # print(f"check eval_ys: {eval_ys}")
+        # pdb.set_trace()
 
         if eval_ys < 10:
             youngs_modulus = youngs_modulus_
@@ -704,9 +715,19 @@ class Trainer:
             # record drive points sequence
             render_pos_list = [(init_xyzs.clone() * self.scale) - self.shift]
             prev_state = self.mpm_state
+            # 2025-02-09 Save particle_v for debugging
+            particle_v_list = []
+            grid_v_in_list = []
+            grid_v_out_list = []
             for i in tqdm(range(int((30) * num_sec))):
                 # iterate over substeps for each frame
                 for substep_local in range(num_substeps):
+                    particle_v_list.append(wp.to_torch(prev_state.particle_v).clone().detach().cpu().numpy())
+                    # if i < 60:
+                    #     # if we save all 90 frames, will be OOM
+                    #     grid_v_in_list.append(wp.to_torch(prev_state.grid_v_in).clone().detach().cpu().numpy())
+                    #     grid_v_out_list.append(wp.to_torch(prev_state.grid_v_out).clone().detach().cpu().numpy())
+
                     next_state = prev_state.partial_clone(requires_grad=False)
                     self.mpm_solver.p2g2p_differentiable(
                         self.mpm_model,
@@ -721,6 +742,21 @@ class Trainer:
                 # undo scaling and shifting
                 pos = (pos * self.scale) - self.shift
                 render_pos_list.append(pos)
+            
+            particle_v_list_ = np.stack(particle_v_list, axis=0)
+            particle_v_output_path = pos_path.replace(".npy", "_particle_v.npy")
+            np.save(particle_v_output_path, particle_v_list_)
+            print(f"Save particle_v to {particle_v_output_path}")
+
+            # grid_v_in_list_ = np.stack(grid_v_in_list, axis=0)
+            # grid_v_in_output_path = pos_path.replace(".npy", "_grid_v_in.npy")
+            # np.save(grid_v_in_output_path, grid_v_in_list_)
+            # pdb.set_trace()
+
+            # grid_v_out_list_ = np.concatenate(grid_v_out_list, axis=0)
+            # grid_v_out_output_path = pos_path.replace(".npy", "_grid_v_out.npy")
+            # np.save(grid_v_out_output_path, grid_v_out_list_)
+            # pdb.set_trace()
 
             # save the sequence of drive points
             numpy_pos = torch.stack(render_pos_list, dim=0).detach().cpu().numpy()
@@ -771,6 +807,7 @@ class Trainer:
                 closest_idx,
                 render_force,
                 force_duration_steps,
+                hide_force=self.hide_force
             )
             video_numpy = np.transpose(video_numpy, [0, 2, 3, 1])
 
@@ -781,7 +818,7 @@ class Trainer:
                 + "_camid_{}".format(self.demo_cfg["cam_id"])
             )
 
-        save_name = save_name + "_" + self.demo_cfg["name"]
+        # save_name = save_name + "_" + self.demo_cfg["name"]
         save_path = os.path.join(result_dir, save_name + ".mp4")
 
         print("save video to ", save_path)
@@ -932,6 +969,9 @@ def parse_args():
     parser.add_argument("--apply_force", action="store_true", default=False)
     parser.add_argument("--cam_id", type=int, default=0)
     parser.add_argument("--static_camera", action="store_true", default=False)
+    parser.add_argument("--hide_force", action="store_true", default=False)
+    parser.add_argument("--postfix", type=str, default="")
+   
 
     args, extra_args = parser.parse_known_args()
 

@@ -69,7 +69,6 @@ def from_torch_safe(t, dtype=None, requires_grad=None, grad=None):
         if t.grad is None:
             # allocate a zero-filled gradient tensor if it doesn't exist
             import torch
-
             t.grad = torch.zeros_like(t, requires_grad=False)
         grad = from_torch(t.grad, dtype=dtype)
 

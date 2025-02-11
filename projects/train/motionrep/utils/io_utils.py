@@ -68,6 +68,7 @@ def save_gif_imageio(video_path, img_list, fps):
     imageio.mimsave(video_path, img_list, format="GIF", fps=fps)
 
 
+
 def save_video_mediapy(video_frames, output_video_path: str = None, fps: int = 14):
     # video_frames: [N, H, W, 3]
     if isinstance(video_frames[0], PIL.Image.Image):

@@ -81,11 +81,14 @@ from local_utils import (
     render_gaussian_seq_w_mask_cam_seq,
     downsample_with_kmeans_gpu,
     render_gaussian_seq_w_mask_with_disp,
+    render_gaussian_seq_w_mask_cam_seq_with_force_with_disp,
+    add_constant_force,
 )
 from interface import (
     MPMDifferentiableSimulationWCheckpoint,
     MPMDifferentiableSimulationClean,
 )
+from motionrep.utils.io_utils import save_video_imageio, save_gif_imageio
 
 logger = get_logger(__name__, log_level="INFO")
 
@@ -159,6 +162,7 @@ class Trainer:
         )
 
         logging_dir = os.path.join(args.output_dir, args.wandb_name)
+        logging_dir = logging_dir + args.postfix
         accelerator_project_config = ProjectConfiguration(logging_dir=logging_dir)
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         accelerator = Accelerator(
@@ -243,10 +247,12 @@ class Trainer:
         self.train_iters = args.train_iters
         self.accelerator = accelerator
         # init traiable params
+        self.initE = args.initE
         E_nu_list = self.init_trainable_params()
         for p in E_nu_list:
             p.requires_grad = True
         self.E_nu_list = E_nu_list
+        print(f"check E_nu_list: {E_nu_list}")
 
         self.model = accelerator.prepare(self.model)
         self.setup_simulation(dataset_dir, grid_size=args.grid_size)
@@ -371,6 +377,17 @@ class Trainer:
                 self.wandb_folder = run.dir
                 os.makedirs(self.wandb_folder, exist_ok=True)
 
+        
+        self.apply_force = args.apply_force
+        if self.apply_force:
+            # TODO: combine these to a single self.force_config
+            self.center_point = args.center_point
+            self.force_dir = args.force_dir
+            self.force_mag = args.force_mag
+            self.force_duration = args.force_duration
+            self.force_radius = args.force_radius
+            
+
     def init_trainable_params(
         self,
     ):
@@ -381,7 +398,7 @@ class Trainer:
             np.float32
         )
 
-        young_numpy = np.array([1e5]).astype(np.float32)
+        young_numpy = np.array([self.initE]).astype(np.float32)
 
         young_modulus = torch.tensor(young_numpy, dtype=torch.float32).to(
             self.accelerator.device
@@ -475,7 +492,9 @@ class Trainer:
 
         downsample_scale = self.args.downsample_scale
         num_cluster = int(sim_xyzs.shape[0] * downsample_scale)
+        print(f"Before downsample: {sim_xyzs.shape[0]}, num_cluster: {num_cluster}")
         sim_xyzs = downsample_with_kmeans_gpu(sim_xyzs, num_cluster) # downsample the simulated particles for faster simulation
+
 
         sim_gaussian_pos = self.render_params.gaussians.get_xyz.detach().clone()[
             self.sim_mask_in_raw_gaussian, :
@@ -526,7 +545,7 @@ class Trainer:
         material_params = {
             "material": "jelly",  # "jelly", "metal", "sand", "foam", "snow", "plasticine", "neo-hookean"
             "g": [0.0, 0.0, 0.0],
-            "density": 2000,  # kg / m^3
+            "density": 200,  # kg / m^3
             "grid_v_damping_scale": 1.1,  # 0.999,
         }
 
@@ -626,7 +645,7 @@ class Trainer:
         )
         self.velo_fields.train()
 
-    def get_simulation_input(self, device):
+    def get_simulation_input(self, device, delta_time=1.0 / 30):
         """
         Outs: All padded
             density: [N]
@@ -636,27 +655,73 @@ class Trainer:
             query_mask: [N]
         """
 
+        # Get material params
         density, youngs_modulus, ret_poisson, entropy = self.get_material_params(device)
         initial_position_time0 = self.particle_init_position.clone()
 
         query_mask = torch.logical_not(self.freeze_mask)
         query_pts = initial_position_time0[query_mask, :]
 
-        # velocity = self.velo_fields(torch.cat([query_pts, time_array.unsqueeze(-1)], dim=-1))[..., :3]
-        velocity = self.velo_fields(query_pts)[..., :3]
+        # Get velocity
+        if self.apply_force:
+            # Instead of loading velocity from velocity field, we set initial velocity to zero and apply force to the particles
+            ret_velocity = torch.zeros_like(initial_position_time0)
 
-        # scaling
-        velocity = velocity * 0.1  # not padded yet
-        ret_velocity = torch.zeros_like(initial_position_time0)
-        ret_velocity[query_mask, :] = velocity
+            center_point = (
+                torch.from_numpy(np.array(self.center_point)).to(device).float()
+            )
+            force = torch.from_numpy(np.array(self.force_dir)*self.force_mag).to(device).float()
 
-        # init F, and C
+            force_duration = self.force_duration  # sec
+            force_duration_steps = int(force_duration / delta_time)
 
+            # apply force to points within the radius of the center point
+            force_radius = self.force_radius
+
+            # add constant force
+            xyzs = self.particle_init_position.clone() * self.scale - self.shift
+            print(f"add constant force: center_point {center_point}, force_radius {force_radius}, force {force}, delta_time {delta_time}, force_duration {force_duration}")
+            add_constant_force(
+                self.mpm_solver,
+                self.mpm_state,
+                xyzs,
+                center_point,
+                force_radius,
+                force,
+                delta_time,
+                0.0,
+                force_duration,
+                device=device,
+            )
+
+            # prepare to render force in simulated videos:
+            #   find the closest point to the force center, and will use it to render the force
+            xyzs = self.render_params.gaussians.get_xyz.detach().clone()
+            dist = torch.norm(xyzs - center_point.unsqueeze(dim=0), dim=-1)
+            closest_idx = torch.argmin(dist)
+            closest_xyz = xyzs[closest_idx, :]
+            render_force = force / force.norm() * 0.1
+            # print(f"check particle_velo after apply_force") # all zeros here. only append function to pre_p2g_operations here
+            # pdb.set_trace()     
+
+
+        else:
+            # velocity = self.velo_fields(torch.cat([query_pts, time_array.unsqueeze(-1)], dim=-1))[..., :3]
+            velocity = self.velo_fields(query_pts)[..., :3]
+
+            # scaling
+            velocity = velocity * 0.1  # not padded yet # TODO: why scale the velocity by 0.1?
+
+            ret_velocity = torch.zeros_like(initial_position_time0)
+            ret_velocity[query_mask, :] = velocity
+
+        # init F as Idensity Matrix, and C and Zero Matrix
         I_mat = torch.eye(3, dtype=torch.float32).to(device)
         particle_F = torch.repeat_interleave(
             I_mat[None, ...], initial_position_time0.shape[0], dim=0
         )
         particle_C = torch.zeros_like(particle_F)
+        
 
         return (
             density,
@@ -710,7 +775,8 @@ class Trainer:
         cam = data["cam"][0]
 
         gt_videos = data["video_clip"][0, 1 : self.num_frames, ...]
-        print(f"check video data: video_clip {data["video_clip"].shape}, gt_videos {gt_videos.shape}")
+        print(f"check video data: video_clip {data['video_clip'].shape}, gt_videos {gt_videos.shape}")
+        # video_clip torch.Size([1, 25, 3, 576, 1024]), gt_videos torch.Size([13, 3, 576, 1024])
 
         window_size = int(self.window_size_schduler.compute_state(self.step)[0]) # number of frames to run simulation in this training iteration
         print(f"window_size {window_size}") 
@@ -723,6 +789,7 @@ class Trainer:
             self.velo_fields.eval()
 
         rendered_video_list = []
+        rendered_video_w_force_list = []
         log_loss_dict = {
             "loss": [],
             "l2_loss": [],
@@ -761,25 +828,33 @@ class Trainer:
             particle_velo = particle_velo.detach()
         # print("does do velo opt": do_velo_opt)
 
+        # print(f"check particle_velo after getting simulation input: {particle_velo.shape}") # [5342, 3]
+        # tensor([[-0.0225,  0.0221, -0.0139],
+        # [-0.0215,  0.0211, -0.0134],
+        # [-0.0216,  0.0213, -0.0134],
+        # ...,
+        # [-0.0216,  0.0212, -0.0134],
+        # [-0.0222,  0.0218, -0.0138],
+        # [-0.0222,  0.0218, -0.0138]], device='cuda:0')
+        # pdb.set_trace()
+
         num_particles = particle_pos.shape[0]
 
         delta_time = 1.0 / 30  # 30 fps
         substep_size = delta_time / self.args.substep # 1/30/768 = 4.34e-5
         num_substeps = int(delta_time / substep_size)
 
-        checkpoint_steps = self.args.checkpoint_steps
-
-        start_time_idx = max(0, window_size - self.args.compute_window)
-        print(f"start_time_idx {start_time_idx}")
+        checkpoint_steps = self.args.checkpoint_steps  
 
         temporal_stride = self.args.stride
 
         if temporal_stride < 0 or temporal_stride > window_size:
             temporal_stride = window_size
 
-        for start_time_idx in range(0, window_size, temporal_stride): 
+        for start_time_idx in range(0, window_size, temporal_stride):
 
             end_time_idx = min(start_time_idx + temporal_stride, window_size)
+            print(f"start_time_idx {start_time_idx}, end_time_idx {end_time_idx}, window_size {window_size}, temporal_stride {temporal_stride}")
             # end_time_idx-start_time_idx => frame per stage
             num_step_with_grad = num_substeps * (end_time_idx - start_time_idx) # ~= num_substeps per stage
 
@@ -834,11 +909,12 @@ class Trainer:
                         device,
                         True,
                         0,
+                        start_time_idx,
+                        self.step,
                     )
                 )
 
             # substep-3: render gaussian
-
             gaussian_pos = particle_pos * self.scale - self.shift
             undeformed_gaussian_pos = (
                 self.particle_init_position * self.scale - self.shift
@@ -855,8 +931,29 @@ class Trainer:
                 self.sim_mask_in_raw_gaussian,
             )
 
+            # print(f'step {self.step}, start_time_idx {start_time_idx}, check simulated_video {simulated_video.shape}, gt_frame {gt_frame.shape}')
+            # print(f"check particle_v in simualted_video")
+            # print(self.mpm_state.particle_v.numpy())
+            # pdb.set_trace()
+
+            # if self.apply_force:
+            #     simulate_video_w_force = render_gaussian_seq_w_mask_cam_seq_with_force_with_disp(
+            #         [cam],
+            #         self.render_params,
+            #         undeformed_gaussian_pos.detach(),
+            #         self.top_k_index,
+            #         [disp_offset],
+            #         self.sim_mask_in_raw_gaussian,
+            #         closest_idx,
+            #         render_force,
+            #         force_duration_steps,
+            #         hide_force=False
+            #     )
+
             # print("debug", simulated_video.shape, gt_frame.shape, gaussian_pos.shape, init_xyzs.shape, density.shape, query_mask.sum().item())
             rendered_video_list.append(simulated_video.detach())
+            # if self.apply_force:
+            #     rendered_video_w_force_list.append(simulate_video_w_force)
 
             l2_loss = 0.5 * F.mse_loss(simulated_video, gt_frame, reduction="mean")
             ssim_loss = compute_ssim(simulated_video, gt_frame)
@@ -876,6 +973,9 @@ class Trainer:
             loss = loss + sm_loss * self.tv_loss_weight
             loss = loss + entropy * self.args.entropy_reg
             loss = loss / self.args.compute_window
+            print(f"check loss details, sm_velo_loss {sm_velo_loss.item()}, sm_spatial_loss {sm_spatial_loss.item()}, entropy {entropy.item()}, l2_loss {l2_loss.item()}, ssim_loss {ssim_loss.item()}, loss {loss.item()}")
+            print(f"step: {self.step}, start_time_idx {start_time_idx}, check loss before backward {loss.item()}")
+            # pdb.set_trace()
             loss.backward()
 
             # from IPython import embed; embed()
@@ -897,10 +997,7 @@ class Trainer:
                 log_loss_dict["entropy"].append(entropy.item())
 
                 print(
-                    psnr.item(),
-                    end_time_idx,
-                    youngs_modulus.max().item(),
-                    density.max().item(),
+                    f"step {self.step}, start_time_idx {start_time_idx}, psnr {psnr.item()}, end_time_idx {end_time_idx}, youngs_modulus max {youngs_modulus.max().item()}, density max {density.max().item()}"
                 )
                 log_psnr_dict["psnr_frame_{}".format(end_time_idx)] = psnr.item()
                 # print(psnr.item(), end_time_idx, youngs_modulus.max().item(), density.max().item())
@@ -914,11 +1011,17 @@ class Trainer:
         for p in self.velo_fields.parameters():
             if p.grad is not None:
                 velo_grad_norm += p.grad.norm(2).item()
+        print(f"finish all start_time_idx, check grad before clipping")
 
         renderd_video = torch.cat(rendered_video_list, dim=0)
         renderd_video = torch.clamp(renderd_video, 0.0, 1.0)
         visual_video = (renderd_video.detach().cpu().numpy() * 255.0).astype(np.uint8)
+        print(f"check visual_video type {type(visual_video)} shape {visual_video.shape}") # [6, 3, 576, 1024]
         gt_video = (gt_videos.detach().cpu().numpy() * 255.0).astype(np.uint8)
+        # if self.apply_force:
+        #     print(f"check rendered_video_w_force_list type {type(rendered_video_w_force_list)} {type(rendered_video_w_force_list[0])}, shape {rendered_video_w_force_list[0].shape}")
+        #     visual_video_w_force = np.concatenate(rendered_video_w_force_list, axis=0) # [6, 3, 576, 1024]
+        #     visual_video_w_force = np.clip(visual_video_w_force, 0.0, 255.0).astype(np.uint8)
 
         if (
             self.step % self.gradient_accumulation_steps == 0
@@ -931,6 +1034,30 @@ class Trainer:
                 self.max_grad_norm,
                 error_if_nonfinite=False,
             )  # error if nonfinite is false
+
+            # # save visual_video and gt_video as .mp4
+            # print(f"save visual_video and gt_video as .mp4, shape ", visual_video.shape, gt_video.shape) #[6, 3, 576, 1024], [13, 3 ,576, 1024]
+            # visual_video_path = os.path.join(self.output_path, f"rendered_video_{self.step:06d}.mp4")
+            # save_video_imageio(visual_video_path, visual_video.transpose(0, 2, 3, 1), fps=30)
+            # gt_video_path = os.path.join(self.output_path, f"gt_video_{self.step:06d}.mp4")
+            # save_video_imageio(gt_video_path, gt_video.transpose(0, 2, 3, 1), fps=30)
+            # if self.apply_force:
+            #     visual_video_w_force_path = os.path.join(self.output_path, f"rendered_video_w_force_{self.step:06d}.mp4")
+            #     save_video_imageio(visual_video_w_force_path, visual_video_w_force.transpose(0, 2, 3, 1), fps=30)
+
+            # # save per frame as .png
+            # for i in range(visual_video.shape[0]):
+            #     visual_frame_path = os.path.join(self.output_path, f"visual_frame_{self.step:06d}_{i:02d}.png")
+            #     imageio.imwrite(visual_frame_path, visual_video[i].transpose(1, 2, 0))
+            # for i in range(gt_video.shape[0]):
+            #     gt_frame_path = os.path.join(self.output_path, f"gt_frame_{self.step:06d}_{i:02d}.png")
+            #     imageio.imwrite(gt_frame_path, gt_video[i].transpose(1, 2, 0))
+            # if self.apply_force:
+            #     for i in range(visual_video_w_force.shape[0]):
+            #         visual_frame_w_force_path = os.path.join(self.output_path, f"visual_frame_w_force_{self.step:06d}_{i:02d}.png")
+            #         imageio.imwrite(visual_frame_w_force_path, visual_video_w_force[i].transpose(1, 2, 0))
+
+            # pdb.set_trace()
 
             self.optimizer.step()
             self.optimizer.zero_grad()
@@ -1051,6 +1178,7 @@ class Trainer:
                         fps=simulated_video.shape[0],
                     )
 
+                    print(f"generate inference_video_v5_t3 for step {self.step}")
                     simulated_video = self.inference(
                         cam, velo_scaling=5.0, num_sec=3, substep=num_substeps
                     )
@@ -1094,6 +1222,11 @@ class Trainer:
 
         device = "cuda:{}".format(self.accelerator.process_index)
 
+        # delta_time = 1.0 / (self.num_frames - 1)
+        delta_time = 1.0 / 30  # 30 fps
+        substep_size = delta_time / substep
+        num_substeps = int(delta_time / substep_size)
+        print(f"run get_simulation_input in inference ...")
         (
             density,
             youngs_modulus_,
@@ -1103,7 +1236,7 @@ class Trainer:
             particle_F,
             particle_C,
             entropy,
-        ) = self.get_simulation_input(device)
+        ) = self.get_simulation_input(device, delta_time)
 
         poisson = self.E_nu_list[1].detach().clone()  # override poisson
 
@@ -1114,11 +1247,6 @@ class Trainer:
         init_velocity[query_mask, :] = init_velocity[query_mask, :] * velo_scaling
 
         num_particles = init_xyzs.shape[0]
-
-        # delta_time = 1.0 / (self.num_frames - 1)
-        delta_time = 1.0 / 30  # 30 fps
-        substep_size = delta_time / substep
-        num_substeps = int(delta_time / substep_size)
         # reset state
 
         self.mpm_state.reset_density(
@@ -1141,13 +1269,17 @@ class Trainer:
         pos_list = [self.particle_init_position.clone() * self.scale - self.shift]
 
         prev_state = self.mpm_state
+
+        # print(f"start running simulation, check grid_v_in")
+        # print(prev_state.grid_v_in.numpy())
+
         for i in tqdm(range((self.num_frames - 1) * num_sec)):
             # for substep in range(num_substeps):
             #     self.mpm_solver.p2g2p(self.mpm_model, self.mpm_state, substep, substep_size, device="cuda:0")
             # pos = wp.to_torch(self.mpm_state.particle_x).clone()
-
             for substep_local in range(num_substeps):
                 next_state = prev_state.partial_clone(requires_grad=False)
+                # print(f"run p2g2p_differentiable in inference for i {i}, substep_local {substep_local}")
                 self.mpm_solver.p2g2p_differentiable(
                     self.mpm_model, prev_state, next_state, substep_size, device=device
                 )
@@ -1159,6 +1291,9 @@ class Trainer:
 
         init_pos = pos_list[0].clone()
         pos_diff_list = [_ - init_pos for _ in pos_list]
+        # print(f"pos_diff_list")
+        # print(pos_diff_list)
+        # pdb.set_trace()
 
         video_array = render_gaussian_seq_w_mask_with_disp(
             cam,
@@ -1318,6 +1453,11 @@ class Trainer:
 
         device = "cuda:{}".format(self.accelerator.process_index)
 
+        # delta_time = 1.0 / (self.num_frames - 1)
+        delta_time = 1.0 / 30  # 30 fps
+        substep_size = delta_time / substep
+        num_substeps = int(delta_time / substep_size)
+
         (
             density,
             youngs_modulus_,
@@ -1327,7 +1467,7 @@ class Trainer:
             particle_F,
             particle_C,
             entropy,
-        ) = self.get_simulation_input(device)
+        ) = self.get_simulation_input(device, delta_time)
 
         poisson = self.E_nu_list[1].detach().clone()  # override poisson
 
@@ -1344,11 +1484,6 @@ class Trainer:
             init_velocity[query_mask, :] = init_velocity[query_mask, :] * velo_scaling
 
             num_particles = init_xyzs.shape[0]
-
-            # delta_time = 1.0 / (self.num_frames - 1)
-            delta_time = 1.0 / 30  # 30 fps
-            substep_size = delta_time / substep
-            num_substeps = int(delta_time / substep_size)
             # reset state
 
             self.mpm_state.reset_density(
@@ -1415,8 +1550,6 @@ class Trainer:
         video_numpy = video_array.detach().cpu().numpy() * 255
         video_numpy = np.clip(video_numpy, 0, 255).astype(np.uint8)
         video_numpy = np.transpose(video_numpy, [0, 2, 3, 1])
-
-        from motionrep.utils.io_utils import save_video_imageio, save_gif_imageio
 
         save_path = os.path.join(
             save_name
@@ -1528,6 +1661,11 @@ def parse_args():
         default=-1,
         help="For distributed training: local_rank",
     )
+
+    # impulse force condition
+    parser.add_argument("--apply_force", action="store_true", default=False)
+    parser.add_argument("--initE", type=float, default=1e5)
+    parser.add_argument("--postfix", type=str, default="")
 
     args, extra_args = parser.parse_known_args()
     cfg = create_config(args.config, args, extra_args)

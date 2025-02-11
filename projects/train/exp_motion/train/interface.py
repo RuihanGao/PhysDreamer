@@ -13,7 +13,8 @@ from thirdparty_code.warp_mpm.mpm_utils import compute_position_l2_loss, aggrega
 from thirdparty_code.warp_mpm.mpm_data_structure import MPMStateStruct, MPMModelStruct, get_float_array_product
 from thirdparty_code.warp_mpm.mpm_utils import (compute_Closs_with_grad, compute_Floss_with_grad, 
                                                 compute_posloss_with_grad, compute_veloloss_with_grad)
-
+import pdb
+import numpy as np
 
 class MPMDifferentiableSimulation(autograd.Function):
 
@@ -566,6 +567,8 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         device: str="cuda:0",
         requires_grad: bool=True,
         extra_no_grad_steps: int=0,
+        start_time_idx: int=0,
+        step: int=0,
     ) -> Tuple[Float[Tensor, "n 3"], Float[Tensor, "n 3"], Float[Tensor, "n 9"], Float[Tensor, "n 9"], Float[Tensor, "n 6"]]:
         """
         Args:
@@ -633,11 +636,30 @@ class MPMDifferentiableSimulationClean(autograd.Function):
             )
             mpm_solver.prepare_mu_lam(mpm_model, prev_state, device=device)
 
+            # print(f"In forward simulation num_substeps {num_substeps}") # 768
+
+            # particle_v_list = []
             for substep_local in range(num_substeps):
+                # print(f"substep_local {substep_local}")
+                # particle_v_list.append(wp.to_torch(prev_state.particle_v).clone().detach().cpu().numpy())
                 next_state = prev_state.partial_clone(requires_grad=True)
+                # print(f"prev_state particle_v \n {prev_state.particle_v.numpy()}")
                 mpm_solver.p2g2p_differentiable(mpm_model, prev_state, next_state, substep_size, device=device)
+                # print(f"next_state particle_v \n {next_state.particle_v.numpy()}")
                 next_state_list.append(next_state)
                 prev_state = next_state
+
+                if np.isnan(next_state.particle_v.numpy()).any():
+                    print(f"we have none-nan particle-velocity till step {step}, substep_local {substep_local}")
+                    pdb.set_trace()  
+            
+            # particle_v_list_ = np.stack(particle_v_list, axis=0)
+            # particle_v_output_path = f"particle_v_step_{step}_start_time_idx_{start_time_idx}.npy"
+            # np.save(particle_v_output_path, particle_v_list_)
+            # print(f"Save particle_v to {particle_v_output_path}")
+            # print(f"check particle_v in forward simulation after p2g2p_differentiable")
+            # print(f"{next_state.particle_v.numpy()}")
+            # pdb.set_trace()  # particle_v start from 0, end with max 0.0016707076 min -9.689669e-05, require_grad=True, shape (5342, 3)
         
         ctx.mpm_solver = mpm_solver
         ctx.mpm_model = mpm_model
@@ -664,6 +686,9 @@ class MPMDifferentiableSimulationClean(autograd.Function):
     @staticmethod
     def backward(ctx, out_pos_grad: Float[Tensor, "n 3"], out_velo_grad: Float[Tensor, "n 3"], 
                  out_F_grad: Float[Tensor, "n 9"], out_C_grad: Float[Tensor, "n 9"], out_cov_grad: Float[Tensor, "n 6"]):
+
+        print(f"in customize backward, out_pos_grad {out_pos_grad.sum()}, out_velo_grad {out_velo_grad.sum()}, out_F_grad {out_F_grad.sum()}, out_C_grad {out_C_grad.sum()}, out_cov_grad {out_cov_grad.sum()}")
+        # pdb.set_trace()
         
         num_particles = ctx.num_particles
         device = ctx.device
@@ -679,6 +704,9 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         with wp.ScopedDevice(device):
             
             grad_pos_wp = from_torch_safe(out_pos_grad, dtype=wp.vec3, requires_grad=False)
+
+            # print(f"check state before tape backward")
+            # pdb.set_trace()
             
             with tape:
                 loss_wp = torch.zeros(1, device=device)
@@ -696,6 +724,7 @@ class MPMDifferentiableSimulationClean(autograd.Function):
                     ],
                     device=device,
                 )
+                # loss_wp = [0.00090219]
 
             # wp.synchronize_device(device)            
             tape.backward(loss_wp)
@@ -705,7 +734,12 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         velo_grad = wp.to_torch(starting_state.particle_v.grad).detach().clone()
         F_grad = wp.to_torch(starting_state.particle_F_trial.grad).detach().clone()
         C_grad = wp.to_torch(starting_state.particle_C.grad).detach().clone()
-        # print("debug back", velo_grad)
+        # print(f"check grad after tape.backward")
+        # pdb.set_trace()
+        
+        print(f"debug backward: pos_grad {pos_grad.abs().sum()}, velo_grad {velo_grad.abs().sum()}, F_grad {F_grad.abs().sum()}, C_grad {C_grad.abs().sum()}")
+        # pdb.set_trace()
+        
 
         # grad for E, nu. TODO: add spatially varying E, nu later
         if ctx.aggregating_E:
@@ -739,15 +773,15 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         if starting_state.particle_density.grad is None:
             density_grad = None
         else:
-            density_grad = wp.to_torch(starting_state.particle_density.grad).detach()
+            density_grad = wp.to_torch(starting_state.particleFyou_density.grad).detach()
         density_mask_grad = None
 
         tape.zero()
-        # print(density_grad.abs().sum(), velo_grad.abs().sum(), E_grad.abs().item(), nu_grad.abs().item(), "in sim func")
+        # print(velo_grad.abs().sum(), E_grad.abs().item(), nu_grad.abs().item(), "in backward func")
         # from IPython import embed; embed()
         
         return (None, None, None, None, None,
                 pos_grad, velo_grad, F_grad, C_grad, 
                 E_grad, nu_grad,
                 density_grad, density_mask_grad, 
-                None, None, None)
+                None, None, None, None, None)

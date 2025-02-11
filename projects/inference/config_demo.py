@@ -67,6 +67,8 @@ class DemoParams(object):
         point_id: int = 0,
         cam_id: int = 0,
         apply_force: bool = False,
+        hide_force: bool = False,
+        postfix="",
     ):
         if demo_name == "None":
             demo_name = None
@@ -104,6 +106,12 @@ class DemoParams(object):
                 name += f"_force_{force_id}_mag_{force_mag}_point_{point_id}"
             else:
                 name += f"_no_force_velo_{velo_scaling}"
+
+            if hide_force:
+                name += "_hf"
+
+            name += postfix
+
             cfg["name"] = name
 
         cfg["dataset_dir"] = self.dataset_dir
