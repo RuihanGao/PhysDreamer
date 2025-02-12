@@ -669,6 +669,7 @@ def add_constant_force(
     start_time,
     end_time,
     device,
+    impulse_mode
 ):
     """
     Args:
@@ -688,25 +689,30 @@ def add_constant_force(
 
     print(apply_force_mask.shape, apply_force_mask.sum().item(), "apply force mask")
 
-    # mpm_sovler.add_impulse_on_particles_with_mask(
-    #     mpm_state,
-    #     force,
-    #     dt,
-    #     apply_force_mask,
-    #     start_time=start_time,
-    #     end_time=end_time,
-    #     device=device,
-    # )
+    if impulse_mode == "particle":
+        mpm_sovler.add_impulse_on_particles_with_mask(
+            mpm_state,
+            force,
+            dt,
+            apply_force_mask,
+            start_time=start_time,
+            end_time=end_time,
+            device=device,
+        )
 
-    mpm_sovler.add_impulse_on_particles_with_mask_differentiable(
-        mpm_state,
-        force,
-        dt,
-        apply_force_mask,
-        start_time=start_time,
-        end_time=end_time,
-        device=device,
-    )
+    elif impulse_mode == "grid":
+        mpm_sovler.add_impulse_on_particles_with_mask_differentiable(
+            mpm_state,
+            force,
+            dt,
+            apply_force_mask,
+            start_time=start_time,
+            end_time=end_time,
+            device=device,
+        )
+    
+    else:
+        raise NotImplementedError(f"Unknown impulse mode {impulse_mode}")
 
 
 

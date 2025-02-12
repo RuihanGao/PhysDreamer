@@ -365,26 +365,47 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: float
     p = wp.tid()
     if state.particle_selection[p] == 0:
         stress = state.particle_stress[p]
+
+        # Vector2i base_coord=(p.x*inv_dx-Vec(0.5_f)).cast<int>(); // element-wise floor
+        # Vec fx = p.x * inv_dx - base_coord.cast<real>();
         grid_pos = state.particle_x[p] * model.inv_dx
-        base_pos_x = wp.int(grid_pos[0] - 0.5)
-        base_pos_y = wp.int(grid_pos[1] - 0.5)
-        base_pos_z = wp.int(grid_pos[2] - 0.5)
+        # base_pos_x = wp.int(grid_pos[0] - 0.5)
+        # base_pos_y = wp.int(grid_pos[1] - 0.5)
+        # base_pos_z = wp.int(grid_pos[2] - 0.5)
+
+        base_pos_x = wp.int(wp.floor(grid_pos[0] - 0.5))
+        base_pos_y = wp.int(wp.floor(grid_pos[1] - 0.5))
+        base_pos_z = wp.int(wp.floor(grid_pos[2] - 0.5))
+
         fx = grid_pos - wp.vec3(
             wp.float(base_pos_x), wp.float(base_pos_y), wp.float(base_pos_z)
         )
+
+        # Vec w[3]{Vec(0.5) * sqr(Vec(1.5) - fx), Vec(0.75) - sqr(fx - Vec(1.0)),
+        #         Vec(0.5) * sqr(fx - Vec(0.5))};
+        # sqr: square of each element
         wa = wp.vec3(1.5) - fx
         wb = fx - wp.vec3(1.0)
         wc = fx - wp.vec3(0.5)
         w = wp.mat33(
             wp.cw_mul(wa, wa) * 0.5,
-            wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
+            wp.vec3(0.75, 0.75, 0.75) - wp.cw_mul(wb, wb), # sometimes output -0.25
             wp.cw_mul(wc, wc) * 0.5,
         )
+        
+
+        # for i in range(0, 3):
+        #     for j in range(0, 3):
+        #         if w[i, j] < 0:
+        #             print(w[i, j])
+
         dw = wp.mat33(fx - wp.vec3(1.5), -2.0 * (fx - wp.vec3(1.0)), fx - wp.vec3(0.5))
 
+        # total_weight = 0.0
         for i in range(0, 3):
             for j in range(0, 3):
                 for k in range(0, 3):
+                    
                     dpos = (
                         wp.vec3(wp.float(i), wp.float(j), wp.float(k)) - fx
                     ) * model.dx
@@ -392,6 +413,14 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: float
                     iy = base_pos_y + j
                     iz = base_pos_z + k
                     weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
+                    if weight < 0:
+                        print(weight)
+                        # print(grid_pos[0])
+                        # print(grid_pos[1])
+                        # print(grid_pos[2])
+                        # print(state.particle_x[p][0])
+                        # print(state.particle_x[p][1])
+                        # print(state.particle_x[p][2])
                     dweight = compute_dweight(model, w, dw, i, j, k)
 
                     C = state.particle_C[p]
@@ -421,6 +450,9 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: float
                     wp.atomic_add(
                         state.grid_m, ix, iy, iz, weight * state.particle_mass[p]
                     )
+                    # total_weight += weight
+        # if total_weight < 0.9999 or total_weight > 1.0001:
+        #     print(total_weight)
 
 
 # add gravity
@@ -1017,54 +1049,44 @@ def compute_Closs_with_grad(
 
 @wp.kernel
 def p2g_apply_impulse(time: float, dt: float, state: MPMStateStruct, model: MPMModelStruct, param: Impulse_modifier):
-    # input given to p2g:   particle_stress
-    #                       particle_x
-    #                       particle_v
-    #                       particle_C
-    # output:               grid_v_in, grid_m
+
     p = wp.tid()
-    if time >= param.start_time and time < param.end_time:
-        if state.particle_selection[p] == 0 and param.mask[p] >= 1: # the particle is being simulated (particle_selection = 0) and is within neighborhood of the contact point (param.mask = 1)
-            # compute the weight matrix
-            grid_pos = state.particle_x[p] * model.inv_dx
-            base_pos_x = wp.int(grid_pos[0] - 0.5)
-            base_pos_y = wp.int(grid_pos[1] - 0.5)
-            base_pos_z = wp.int(grid_pos[2] - 0.5)
-            fx = grid_pos - wp.vec3(
-                wp.float(base_pos_x), wp.float(base_pos_y), wp.float(base_pos_z)
-            )
-            wa = wp.vec3(1.5) - fx
-            wb = fx - wp.vec3(1.0)
-            wc = fx - wp.vec3(0.5)
-            w = wp.mat33(
-                wp.cw_mul(wa, wa) * 0.5,
-                wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
-                wp.cw_mul(wc, wc) * 0.5,
-            )
-            # gradient of the weight functions
-            dw = wp.mat33(fx - wp.vec3(1.5), -2.0 * (fx - wp.vec3(1.0)), fx - wp.vec3(0.5))
+    if state.particle_selection[p] == 0 and param.mask[p] >= 1:
+        grid_pos = state.particle_x[p] * model.inv_dx
+        base_pos_x = wp.int(grid_pos[0] - 0.5)
+        base_pos_y = wp.int(grid_pos[1] - 0.5)
+        base_pos_z = wp.int(grid_pos[2] - 0.5)
 
-            # particle impulse
-            impulse = wp.vec3(
-                param.force[0],
-                param.force[1],
-                param.force[2],
-            ) # actually force, so we multiply by dt later to get impulse
+        fx = grid_pos - wp.vec3(
+            wp.float(base_pos_x), wp.float(base_pos_y), wp.float(base_pos_z)
+        )
+        wa = wp.vec3(1.5) - fx
+        wb = fx - wp.vec3(1.0)
+        wc = fx - wp.vec3(0.5)
+        w = wp.mat33(
+            wp.cw_mul(wa, wa) * 0.5,
+            wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
+            wp.cw_mul(wc, wc) * 0.5,
+        )
 
-            # loop over the 3x3x3 grid node neighborhood
-            for i in range(0, 3):
-                for j in range(0, 3):
-                    for k in range(0, 3):
-                        ix = base_pos_x + i
-                        iy = base_pos_y + j
-                        iz = base_pos_z + k
-                        weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation weight
-                        dweight = compute_dweight(model, w, dw, i, j, k)
-                        v_in_add = weight * impulse / state.particle_mass[p] * dt
+        # particle impulse
+        impulse = wp.vec3(
+            param.force[0],
+            param.force[1],
+            param.force[2],
+        ) # actually force, so we multiply by dt later to get impulse
 
-                        # v_in_add = weight * impulse * dt
+        for i in range(0, 3):
+            for j in range(0, 3):
+                for k in range(0, 3):
+                    ix = base_pos_x + i
+                    iy = base_pos_y + j
+                    iz = base_pos_z + k
+                    weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
+                    if weight < 0.0:
+                        print(weight)
 
-                        # directly modify grid velocity with precomputed impulse
-                        wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
-                        # wp.atomic_add(state.grid_m, ix, iy, iz, weight*state.particle_mass[p])
-
+                    v_in_add = weight * impulse * dt
+                    
+                    wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
+                    

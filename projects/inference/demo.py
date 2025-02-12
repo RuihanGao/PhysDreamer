@@ -186,6 +186,7 @@ class Trainer:
             self.sim_fields, self.velo_fields
         )
         self.hide_force = args.hide_force # option to hide force rendering to generate driving video for training
+        self.impulse_mode = args.impulse_mode # option to easily switch applying impulse force to particle or grid
         
 
     def init_trainable_params(
@@ -227,7 +228,7 @@ class Trainer:
         pos_min = sim_xyzs.min()
         scale = (pos_max - pos_min) * 1.8
         shift = -pos_min + (pos_max - pos_min) * 0.25
-        self.scale, self.shift = scale, shift
+        
         print("scale, shift", scale, shift)
 
         # load internal filled points.
@@ -260,7 +261,10 @@ class Trainer:
             self.fill_xyzs = None
             self.render_mask = torch.ones_like(sim_xyzs[:, 0]).bool().to(device)
 
-        sim_xyzs = (sim_xyzs + shift) / scale
+        sim_xyzs = (sim_xyzs + shift) / scale # range [0.1388889104127884, 0.694444477558136]
+        print(f"check sim_xyzs before downsampling: {sim_xyzs.shape}")
+        print(f"check sim_syzs range: {sim_xyzs.min()}, {sim_xyzs.max()}")
+        # pdb.set_trace()
         sim_aabb = torch.stack(
             [torch.min(sim_xyzs, dim=0)[0], torch.max(sim_xyzs, dim=0)[0]], dim=0
         )
@@ -270,6 +274,8 @@ class Trainer:
         ) * 1.2 + torch.mean(sim_aabb, dim=0, keepdim=True)
 
         print("simulation aabb: ", sim_aabb)
+
+        # self.downsample_shift = 0.05
 
         # point cloud resample with kmeans
         if "downsample_scale" in self.demo_cfg:
@@ -288,6 +294,12 @@ class Trainer:
             # sim_xyzs = torch.from_numpy(sim_xyzs).float().to(device)
 
             sim_xyzs = downsample_with_kmeans_gpu(sim_xyzs, num_cluster)
+            print(f"after downsampling, before downsample_shift, check sim_xyzs range: {sim_xyzs.min()}, {sim_xyzs.max()}")
+
+            # sim_xyzs = (sim_xyzs + self.downsample_shift) / scale
+            # shift += self.downsample_shift
+            # print(f"after downsampling, after downsample_shift, check sim_xyzs range: {sim_xyzs.min()}, {sim_xyzs.max()}")
+            
 
             sim_gaussian_pos = self.render_params.gaussians.get_xyz.detach().clone()[
                 self.sim_mask_in_raw_gaussian, :
@@ -301,6 +313,7 @@ class Trainer:
 
             print("Downsampled to: ", sim_xyzs.shape[0], "by", downsample_scale)
 
+        self.scale, self.shift = scale, shift
         # Compute the volume of each particle
         points_volume = get_volume(sim_xyzs.detach().cpu().numpy())
 
@@ -320,7 +333,11 @@ class Trainer:
         mpm_state = MPMStateStruct()
         mpm_state.init(num_particles, device=device, requires_grad=False)
 
-        self.particle_init_position = sim_xyzs.clone()
+        self.particle_init_position = sim_xyzs.clone() # range [0.0, 0.6929837465286255]
+ 
+        print(f"check particle_init_position: {self.particle_init_position.shape}")
+        print(f"check particle_init_position range: {self.particle_init_position.min()}, {self.particle_init_position.max()}")
+        # pdb.set_trace()
 
         mpm_state.from_torch(
             self.particle_init_position.clone(),
@@ -420,7 +437,7 @@ class Trainer:
         )
         self.velo_fields.train()
 
-    def add_constant_force(self, center_point, radius, force, dt, start_time, end_time):
+    def add_constant_force(self, center_point, radius, force, dt, start_time, end_time, impulse_mode="particle"):
         xyzs = self.particle_init_position.clone() * self.scale - self.shift
 
         device = "cuda:{}".format(self.accelerator.process_index)
@@ -435,6 +452,7 @@ class Trainer:
             start_time,
             end_time,
             device=device,
+            impulse_mode=impulse_mode,
         )
 
     def get_simulation_input(self, device):
@@ -678,7 +696,7 @@ class Trainer:
             force_radius = self.demo_cfg["force_radius"]
 
             self.add_constant_force(
-                center_point, force_radius, force, delta_time, 0.0, force_duration
+                center_point, force_radius, force, delta_time, 0.0, force_duration, self.impulse_mode
             )
 
             # prepare to render force in simulated videos:
@@ -723,10 +741,17 @@ class Trainer:
                 # iterate over substeps for each frame
                 for substep_local in range(num_substeps):
                     particle_v_list.append(wp.to_torch(prev_state.particle_v).clone().detach().cpu().numpy())
-                    # if i < 60:
-                    #     # if we save all 90 frames, will be OOM
-                    #     grid_v_in_list.append(wp.to_torch(prev_state.grid_v_in).clone().detach().cpu().numpy())
-                    #     grid_v_out_list.append(wp.to_torch(prev_state.grid_v_out).clone().detach().cpu().numpy())
+                    if np.isnan(prev_state.particle_v.numpy()).any():
+                        print(f"nan in particle_v at frame {i}, substep {substep_local}")
+                        pdb.set_trace()
+                    else:
+                        # print(f"check particle_v range: {prev_state.particle_v.numpy().min()}, {prev_state.particle_v.numpy().max()}")
+                        pass
+                    
+                    if i < 1 and substep_local < 5:
+                        # if we save all 90 frames, will be OOM
+                        grid_v_in_list.append(wp.to_torch(prev_state.grid_v_in).clone().detach().cpu().numpy())
+                        grid_v_out_list.append(wp.to_torch(prev_state.grid_v_out).clone().detach().cpu().numpy())
 
                     next_state = prev_state.partial_clone(requires_grad=False)
                     self.mpm_solver.p2g2p_differentiable(
@@ -735,6 +760,9 @@ class Trainer:
                         next_state,
                         substep_size,
                         device=device,
+                        i=i, 
+                        substep_local=substep_local,
+                        pos_path=pos_path
                     )
                     prev_state = next_state
 
@@ -744,18 +772,18 @@ class Trainer:
                 render_pos_list.append(pos)
             
             particle_v_list_ = np.stack(particle_v_list, axis=0)
-            particle_v_output_path = pos_path.replace(".npy", "_particle_v.npy")
+            particle_v_output_path = pos_path.replace("_pos.npy", "_particle_v.npy")
             np.save(particle_v_output_path, particle_v_list_)
             print(f"Save particle_v to {particle_v_output_path}")
 
-            # grid_v_in_list_ = np.stack(grid_v_in_list, axis=0)
-            # grid_v_in_output_path = pos_path.replace(".npy", "_grid_v_in.npy")
-            # np.save(grid_v_in_output_path, grid_v_in_list_)
+            grid_v_in_list_ = np.stack(grid_v_in_list, axis=0)
+            grid_v_in_output_path = pos_path.replace("_pos.npy", "_grid_v_in.npy")
+            np.save(grid_v_in_output_path, grid_v_in_list_)
             # pdb.set_trace()
 
-            # grid_v_out_list_ = np.concatenate(grid_v_out_list, axis=0)
-            # grid_v_out_output_path = pos_path.replace(".npy", "_grid_v_out.npy")
-            # np.save(grid_v_out_output_path, grid_v_out_list_)
+            grid_v_out_list_ = np.concatenate(grid_v_out_list, axis=0)
+            grid_v_out_output_path = pos_path.replace("_pos.npy", "_grid_v_out.npy")
+            np.save(grid_v_out_output_path, grid_v_out_list_)
             # pdb.set_trace()
 
             # save the sequence of drive points
@@ -770,6 +798,13 @@ class Trainer:
         num_pos = len(render_pos_list)
         init_pos = render_pos_list[0].clone()
         pos_diff_list = [_ - init_pos for _ in render_pos_list]
+        print(f"check pos_diff_list: {len(pos_diff_list)}")
+        pos_diff_list_arr = torch.stack(pos_diff_list).detach().cpu().numpy()
+        pos_diff_path = pos_path.replace("_pos.npy", "_pos_diff.npy")
+        np.save(pos_diff_path, pos_diff_list_arr)
+        nonzero_idx = np.nonzero(pos_diff_list_arr)
+        # len(nonzero_idx[1])/3 # 70830.0 for grid 809698.3333333334 for particle
+        # pdb.set_trace()
 
         if not static_camera:
             interpolated_cameras = get_camera_trajectory(
@@ -971,6 +1006,7 @@ def parse_args():
     parser.add_argument("--static_camera", action="store_true", default=False)
     parser.add_argument("--hide_force", action="store_true", default=False)
     parser.add_argument("--postfix", type=str, default="")
+    parser.add_argument("--impulse_mode", type=str, default="particle")
    
 
     args, extra_args = parser.parse_known_args()
