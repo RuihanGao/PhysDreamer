@@ -103,7 +103,7 @@ class DemoParams(object):
                 name += f"_model_{model_id}"
 
             if apply_force:
-                name += f"_force_{force_id}_mag_{force_mag}_point_{point_id}"
+                name += f"_force_{force_id}_mag_{force_mag}_point_{point_id}_velo_{velo_scaling}"
             else:
                 name += f"_no_force_velo_{velo_scaling}"
 

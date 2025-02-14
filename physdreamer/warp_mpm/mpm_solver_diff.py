@@ -169,7 +169,7 @@ class MPMWARPDiff(object):
         )
 
     def p2g2p_differentiable(
-        self, mpm_model, mpm_state, next_state, dt, device="cuda:0", i=0, substep_local=0, pos_path="", log_substep=2
+        self, mpm_model, mpm_state, next_state, dt, device="cuda:0", i=0, substep_local=0, pos_path="", log_substep=0, debugging=False
     ):
         """
         Some boundary conditions, might not give gradient,
@@ -209,9 +209,14 @@ class MPMWARPDiff(object):
             )
         # print(f"after pre_p2g_operations, particle_v: {np.isnan(mpm_state.particle_v.numpy()).any()}, max {mpm_state.particle_v.numpy().max()}")
 
-        if i == 0 and substep_local < log_substep:
-            output_path = pos_path.replace("_pos.npy", f"_particle_v_afterprep2g_{i}_{substep_local}.npy")
-            np.save(output_path, mpm_state.particle_v.numpy())
+        if debugging:
+            if i == 0 and substep_local < log_substep:
+                output_path = pos_path.replace("_pos.npy", f"_particle_v_afterprep2g_{i}_{substep_local}.npy")
+                np.save(output_path, mpm_state.particle_v.numpy())
+
+        if np.isnan(mpm_state.particle_v.numpy()).any():
+            print(f"after pre_p2g_operations, particle_v has nan element: {np.isnan(mpm_state.particle_v.numpy()).sum()}")
+            pdb.set_trace()
 
         # apply dirichlet particle v modifier
         assert len(self.particle_velocity_modifiers) == 0, "particle_velocity_modifiers is being used, check what it is"
@@ -245,6 +250,9 @@ class MPMWARPDiff(object):
                 device=device,
             )  # F and stress are updated
 
+        if np.isnan(mpm_state.particle_stress.numpy()).any():
+                print(f"after compute_stress_from_F_trial, particle_stress has nan element: {np.isnan(mpm_state.particle_stress.numpy()).sum()}")
+                pdb.set_trace()
 
         # p2g
         # print(f"before p2g_apic_with_stress, grid_v_in: {np.isnan(mpm_state.grid_v_in.numpy()).any()}, max {mpm_state.grid_v_in.numpy().max()}")
@@ -268,13 +276,15 @@ class MPMWARPDiff(object):
         # print(f"after p2g_apic_with_stress, grid_v_in: {np.isnan(mpm_state.grid_v_in.numpy()).any()}, max {mpm_state.grid_v_in.numpy().max()}")
         
         grid_m_arr = mpm_state.grid_m.numpy()
-        if not (grid_m_arr>=0).all():
-            print(f"get negative grid_m after p2g_apic_with_stress {grid_m_arr.min()}")
-            pdb.set_trace()
 
-        if i == 0 and substep_local < log_substep:
-            output_path = pos_path.replace("_pos.npy", f"_grid_vin_afp2g_{i}_{substep_local}.npy")
-            np.save(output_path, mpm_state.grid_v_in.numpy())
+        # if not (grid_m_arr>=0).all():
+        #     print(f"get negative grid_m after p2g_apic_with_stress {grid_m_arr.min()}")
+        #     pdb.set_trace()
+
+        if debugging:
+            if i == 0 and substep_local < log_substep:
+                output_path = pos_path.replace("_pos.npy", f"_grid_vin_afp2g_{i}_{substep_local}.npy")
+                np.save(output_path, mpm_state.grid_v_in.numpy())
 
         
         for k in range(len(self.p2g_extra_operations)):
@@ -287,14 +297,15 @@ class MPMWARPDiff(object):
             )
 
         # print(f"after p2g_extra_operations, grid_v_in: {np.isnan(mpm_state.grid_v_in.numpy()).any()}, max {mpm_state.grid_v_in.numpy().max()}")
-        if i == 0 and substep_local < log_substep:
-            output_path = pos_path.replace("_pos.npy", f"_grid_vin_afextra_{i}_{substep_local}.npy")
-            np.save(output_path, mpm_state.grid_v_in.numpy())
+        if debugging:
+            if i == 0 and substep_local < log_substep:
+                output_path = pos_path.replace("_pos.npy", f"_grid_vin_afextra_{i}_{substep_local}.npy")
+                np.save(output_path, mpm_state.grid_v_in.numpy())
         
-        grid_m_arr = mpm_state.grid_m.numpy()
-        if not (grid_m_arr>=0).all():
-            print(f"get negative grid_m after extra_operation {grid_m_arr.min()}")
-            pdb.set_trace()
+        # grid_m_arr = mpm_state.grid_m.numpy()
+        # if not (grid_m_arr>=0).all():
+        #     print(f"get negative grid_m after extra_operation {grid_m_arr.min()}")
+        #     pdb.set_trace()
 
 
         # grid update
@@ -308,14 +319,10 @@ class MPMWARPDiff(object):
                 device=device,
             )
         # print(f"after grid_normalization_and_gravity, grid_v_out: {np.isnan(mpm_state.grid_v_out.numpy()).any()}, max {mpm_state.grid_v_out.numpy().max()}")
-        if i == 0 and substep_local < log_substep:
-            output_path = pos_path.replace("_pos.npy", f"_grid_vout_gridupdate_{i}_{substep_local}.npy")
-            np.save(output_path, mpm_state.grid_v_out.numpy())
-
-
-        # print(f"check grid_m range {mpm_state.grid_m.numpy().min()}, {mpm_state.grid_m.numpy().max()}")
-        # check grid_m range -0.0024714558385312557, 0.01363636925816536
-        # pdb.set_trace()
+        if debugging:
+            if i == 0 and substep_local < log_substep:
+                output_path = pos_path.replace("_pos.npy", f"_grid_vout_gridupdate_{i}_{substep_local}.npy")
+                np.save(output_path, mpm_state.grid_v_out.numpy())
 
         assert mpm_model.grid_v_damping_scale >= 1.0, f"grid_v_damping_scale is being used, check whether it is desired {mpm_model.grid_v_damping_scale}"
         if mpm_model.grid_v_damping_scale < 1.0:
@@ -349,9 +356,10 @@ class MPMWARPDiff(object):
 
         
         # print(f"after apply_BC_on_grid, grid_v_out: {np.isnan(mpm_state.grid_v_out.numpy()).any()}, max {mpm_state.grid_v_out.numpy().max()}")
-        if i == 0 and substep_local < log_substep:
-            output_path = pos_path.replace("_pos.npy", f"_grid_vout_gridBC_{i}_{substep_local}.npy")
-            np.save(output_path, mpm_state.grid_v_out.numpy())
+        if debugging:
+            if i == 0 and substep_local < log_substep:
+                output_path = pos_path.replace("_pos.npy", f"_grid_vout_gridBC_{i}_{substep_local}.npy")
+                np.save(output_path, mpm_state.grid_v_out.numpy())
 
         # g2p
         with wp.ScopedTimer(
@@ -366,12 +374,8 @@ class MPMWARPDiff(object):
 
         # print(f"after g2p_differentiable, state particle_v: {np.isnan(mpm_state.particle_v.numpy()).any()}, next_state particle_v:  {np.isnan(next_state.particle_v.numpy()).any()}")
 
-        # if i == 0 and substep_local == 2:
-        #     print(f"check p2g2p_differentiable")
-        #     pdb.set_trace()
-
-
         self.time = self.time + dt
+        
 
     def p2g2p(self, mpm_model, mpm_state, step, dt, device="cuda:0"):
         grid_size = (
@@ -1161,6 +1165,9 @@ class MPMWARPDiff(object):
 
         self.pre_p2g_operations.append(apply_force)
 
+    # compared to add_impulse_on_particles_with_mask, we change how the force is applied.
+    # In add_impulse_on_particles_with_mask, the force is applied to particles, and state.particle_v is updated in-place, which breaks the gradient backpropagation.
+    # Instead, we apply the force to grids and directly modify the grid velocity, transferring particle impulse onto the grid.
 
     def add_impulse_on_particles_with_mask_differentiable(
         self,

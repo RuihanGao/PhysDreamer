@@ -27,8 +27,10 @@ import pdb
 import sys
 import os.path as osp
 parent_dir = osp.dirname(osp.dirname(os.getcwd()))
-print(f"add parent_dir {parent_dir} to sys path")
 sys.path.append(parent_dir)
+physdreamer_dir = osp.dirname(osp.dirname(parent_dir))
+sys.path.append(physdreamer_dir)
+print(f"add {parent_dir} and {physdreamer_dir} to sys path")
 
 from motionrep.utils.config import create_config
 from motionrep.utils.optimizer import get_linear_schedule_with_warmup
@@ -59,18 +61,17 @@ from typing import NamedTuple
 import torch.nn.functional as F
 
 from motionrep.utils.img_utils import compute_psnr, compute_ssim
-from thirdparty_code.warp_mpm.mpm_data_structure import (
+
+from physdreamer.warp_mpm.mpm_data_structure import (
     MPMStateStruct,
     MPMModelStruct,
-    get_float_array_product,
 )
-from thirdparty_code.warp_mpm.mpm_solver_diff import MPMWARPDiff
-from thirdparty_code.warp_mpm.warp_utils import from_torch_safe
-from thirdparty_code.warp_mpm.gaussian_sim_utils import get_volume
+from physdreamer.warp_mpm.mpm_solver_diff import MPMWARPDiff
+from physdreamer.warp_mpm.gaussian_sim_utils import get_volume
 import warp as wp
 import random
 
-from local_utils import (
+from physdreamer.local_utils import (
     cycle,
     load_motion_model,
     create_motion_model,
@@ -148,21 +149,28 @@ class Trainer:
         args.warmup_step = int(args.warmup_step * args.gradient_accumulation_steps)
         args.train_iters = int(args.train_iters * args.gradient_accumulation_steps)
         os.environ["WANDB__SERVICE_WAIT"] = "600"
+        # args.wandb_name += (
+        #     "decay_{}_substep_{}_{}_lr_{}_tv_{}_iters_{}_sw_{}_cw_{}".format(
+        #         args.loss_decay,
+        #         args.substep,
+        #         args.model,
+        #         args.lr,
+        #         args.tv_loss_weight,
+        #         args.train_iters,
+        #         args.start_window_size,
+        #         args.compute_window,
+        #     )
+        # )
+
+        # omit default params to save space
         args.wandb_name += (
-            "decay_{}_substep_{}_{}_lr_{}_tv_{}_iters_{}_sw_{}_cw_{}".format(
-                args.loss_decay,
-                args.substep,
-                args.model,
+            "_lr_{}".format(
                 args.lr,
-                args.tv_loss_weight,
-                args.train_iters,
-                args.start_window_size,
-                args.compute_window,
             )
         )
 
+        args.wandb_name = args.wandb_name + args.postfix
         logging_dir = os.path.join(args.output_dir, args.wandb_name)
-        logging_dir = logging_dir + args.postfix
         accelerator_project_config = ProjectConfiguration(logging_dir=logging_dir)
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         accelerator = Accelerator(
@@ -645,7 +653,7 @@ class Trainer:
         )
         self.velo_fields.train()
 
-    def get_simulation_input(self, device, delta_time=1.0 / 30):
+    def get_simulation_input(self, device, delta_time=1.0 / 30, impulse_mode="grid"):
         """
         Outs: All padded
             density: [N]
@@ -692,6 +700,7 @@ class Trainer:
                 0.0,
                 force_duration,
                 device=device,
+                impulse_mode=impulse_mode
             )
 
             # prepare to render force in simulated videos:
@@ -1131,7 +1140,6 @@ class Trainer:
                 wandb_dict.update(log_loss_dict)
 
                 # add young render
-
                 youngs_norm = youngs_modulus - youngs_modulus.min() + 1e-2
                 young_color = youngs_norm / torch.quantile(youngs_norm, 0.99)
                 young_color = torch.clamp(young_color, 0.0, 1.0)

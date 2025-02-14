@@ -44,7 +44,7 @@ from physdreamer.warp_mpm.mpm_solver_diff import MPMWARPDiff
 from physdreamer.warp_mpm.gaussian_sim_utils import get_volume
 import warp as wp
 
-from local_utils import (
+from physdreamer.local_utils import (
     cycle,
     create_spatial_fields,
     find_far_points,
@@ -289,7 +289,7 @@ class Trainer:
             # WARNING: this is a GPU implementation, and will be OOM if the number of points is large
             # you might want to use a CPU implementation if the number of points is large
             # For CPU implementation: uncomment the following lines
-            # from local_utils import downsample_with_kmeans
+            # from physdreamer.local_utils import downsample_with_kmeans
             # sim_xyzs = downsample_with_kmeans(sim_xyzs.detach().cpu().numpy(), num_cluster)
             # sim_xyzs = torch.from_numpy(sim_xyzs).float().to(device)
 
@@ -670,6 +670,13 @@ class Trainer:
             # assign eval_ys to all particles
             youngs_modulus = torch.ones_like(youngs_modulus_) * eval_ys
 
+        print(f"check pretrained material and velocity fields")
+        print(f"check youngs_modulus: {youngs_modulus.shape} range {youngs_modulus.min()}, {youngs_modulus.max()}") # shape [13356, ], range 1417130.5, 105582136.0
+        print(f"check init_velocity: {init_velocity.shape} range {init_velocity.min()}, {init_velocity.max()}") # shape [13356, 3], range -0.02443808503448963, 0.023882806301116943
+        print(f"vx range: {init_velocity[:, 0].min()}, {init_velocity[:, 0].max()}, vy range: {init_velocity[:, 1].min()}, {init_velocity[:, 1].max()}, vz range: {init_velocity[:, 2].min()}, {init_velocity[:, 2].max()}") 
+        # vx range: -0.24438084661960602, -0.1958092898130417, vy range: 0.19218483567237854, 0.23882806301116943, vz range: -0.15181176364421844, -0.12185412645339966
+
+
         # step-1 Setup simulation parameters. External force, or initial velocity.
         #   if --apply_force, we will apply a constant force to points close to the force center
         #   otherwise, we will load the initial velocity from pretrained models, and scale it by velo_scaling.
@@ -771,24 +778,25 @@ class Trainer:
                 pos = (pos * self.scale) - self.shift
                 render_pos_list.append(pos)
             
-            particle_v_list_ = np.stack(particle_v_list, axis=0)
-            particle_v_output_path = pos_path.replace("_pos.npy", "_particle_v.npy")
-            np.save(particle_v_output_path, particle_v_list_)
-            print(f"Save particle_v to {particle_v_output_path}")
+            # # Debugging logs
+            # particle_v_list_ = np.stack(particle_v_list, axis=0)
+            # particle_v_output_path = pos_path.replace("_pos.npy", "_particle_v.npy")
+            # np.save(particle_v_output_path, particle_v_list_)
+            # print(f"Save particle_v to {particle_v_output_path}")
 
-            grid_v_in_list_ = np.stack(grid_v_in_list, axis=0)
-            grid_v_in_output_path = pos_path.replace("_pos.npy", "_grid_v_in.npy")
-            np.save(grid_v_in_output_path, grid_v_in_list_)
-            # pdb.set_trace()
+            # grid_v_in_list_ = np.stack(grid_v_in_list, axis=0)
+            # grid_v_in_output_path = pos_path.replace("_pos.npy", "_grid_v_in.npy")
+            # np.save(grid_v_in_output_path, grid_v_in_list_)
+            # # pdb.set_trace()
 
-            grid_v_out_list_ = np.concatenate(grid_v_out_list, axis=0)
-            grid_v_out_output_path = pos_path.replace("_pos.npy", "_grid_v_out.npy")
-            np.save(grid_v_out_output_path, grid_v_out_list_)
-            # pdb.set_trace()
+            # grid_v_out_list_ = np.concatenate(grid_v_out_list, axis=0)
+            # grid_v_out_output_path = pos_path.replace("_pos.npy", "_grid_v_out.npy")
+            # np.save(grid_v_out_output_path, grid_v_out_list_)
+            # # pdb.set_trace()
 
-            # save the sequence of drive points
-            numpy_pos = torch.stack(render_pos_list, dim=0).detach().cpu().numpy()
-            np.save(pos_path, numpy_pos)
+            # # save the sequence of drive points
+            # numpy_pos = torch.stack(render_pos_list, dim=0).detach().cpu().numpy()
+            # np.save(pos_path, numpy_pos)
         else:
             render_pos_list = []
             for i in range(pos_array.shape[0]):
@@ -798,11 +806,12 @@ class Trainer:
         num_pos = len(render_pos_list)
         init_pos = render_pos_list[0].clone()
         pos_diff_list = [_ - init_pos for _ in render_pos_list]
-        print(f"check pos_diff_list: {len(pos_diff_list)}")
-        pos_diff_list_arr = torch.stack(pos_diff_list).detach().cpu().numpy()
-        pos_diff_path = pos_path.replace("_pos.npy", "_pos_diff.npy")
-        np.save(pos_diff_path, pos_diff_list_arr)
-        nonzero_idx = np.nonzero(pos_diff_list_arr)
+        
+        # print(f"check pos_diff_list: {len(pos_diff_list)}")
+        # pos_diff_list_arr = torch.stack(pos_diff_list).detach().cpu().numpy()
+        # pos_diff_path = pos_path.replace("_pos.npy", "_pos_diff.npy")
+        # np.save(pos_diff_path, pos_diff_list_arr)
+        # nonzero_idx = np.nonzero(pos_diff_list_arr)
         # len(nonzero_idx[1])/3 # 70830.0 for grid 809698.3333333334 for particle
         # pdb.set_trace()
 
@@ -1007,6 +1016,7 @@ def parse_args():
     parser.add_argument("--hide_force", action="store_true", default=False)
     parser.add_argument("--postfix", type=str, default="")
     parser.add_argument("--impulse_mode", type=str, default="particle")
+    parser.add_argument("--entropy_cls", type=int, default=-1) # add the argument to be consistent with the training script
    
 
     args, extra_args = parser.parse_known_args()

@@ -7,11 +7,17 @@ from torch import Tensor
 
 import warp as wp
 
-from thirdparty_code.warp_mpm.warp_utils import from_torch_safe, MyTape, CondTape
-from thirdparty_code.warp_mpm.mpm_solver_diff import MPMWARPDiff
-from thirdparty_code.warp_mpm.mpm_utils import compute_position_l2_loss, aggregate_grad, compute_posloss_with_grad
-from thirdparty_code.warp_mpm.mpm_data_structure import MPMStateStruct, MPMModelStruct, get_float_array_product
-from thirdparty_code.warp_mpm.mpm_utils import (compute_Closs_with_grad, compute_Floss_with_grad, 
+import os
+import os.path as osp
+import sys
+physdreamer_dir = osp.dirname(osp.dirname(osp.dirname(osp.dirname(os.getcwd()))))
+sys.path.append(physdreamer_dir)
+
+from physdreamer.warp_mpm.warp_utils import from_torch_safe, MyTape, CondTape
+from physdreamer.warp_mpm.mpm_solver_diff import MPMWARPDiff
+from physdreamer.warp_mpm.mpm_utils import compute_position_l2_loss, aggregate_grad, compute_posloss_with_grad
+from physdreamer.warp_mpm.mpm_data_structure import MPMStateStruct, MPMModelStruct, get_float_array_product
+from physdreamer.warp_mpm.mpm_utils import (compute_Closs_with_grad, compute_Floss_with_grad, 
                                                 compute_posloss_with_grad, compute_veloloss_with_grad)
 import pdb
 import numpy as np
