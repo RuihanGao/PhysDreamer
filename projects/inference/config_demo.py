@@ -41,7 +41,7 @@ class DemoParams(object):
         substep = self.simulate_cfg["substep"]
         grid_size = self.simulate_cfg["grid_size"]
         self.init_youngs = self.simulate_cfg["init_young"]
-        self.downsample_scale = self.simulate_cfg["downsample_scale"]
+
 
         self.demo_dict = {
             "baseline": {
@@ -52,9 +52,13 @@ class DemoParams(object):
                 "camera_cfg": self.camera_cfg_list[0],
                 "cam_id": 0,
                 "init_youngs": self.init_youngs,
-                "downsample_scale": self.downsample_scale,
+                # "downsample_scale": self.downsample_scale,
             }
         }
+        # 2025-02-14: make downsample_scale configurable
+        if "downsample_scale" in self.simulate_cfg:
+            self.downsample_scale = self.simulate_cfg["downsample_scale"]
+            self.demo_dict["baseline"]["downsample_scale"] = self.downsample_scale
 
     def get_cfg(
         self,
@@ -117,6 +121,7 @@ class DemoParams(object):
         cfg["dataset_dir"] = self.dataset_dir
         cfg["result_dir"] = self.result_dir
         cfg["init_youngs"] = self.init_youngs
-        cfg["downsample_scale"] = self.downsample_scale
+        if "downsample_scale" in self.simulate_cfg:
+            cfg["downsample_scale"] = self.downsample_scale
 
         return cfg

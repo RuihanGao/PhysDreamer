@@ -90,6 +90,7 @@ from interface import (
     MPMDifferentiableSimulationClean,
 )
 from motionrep.utils.io_utils import save_video_imageio, save_gif_imageio
+import gc
 
 logger = get_logger(__name__, log_level="INFO")
 
@@ -553,7 +554,7 @@ class Trainer:
         material_params = {
             "material": "jelly",  # "jelly", "metal", "sand", "foam", "snow", "plasticine", "neo-hookean"
             "g": [0.0, 0.0, 0.0],
-            "density": 200,  # kg / m^3
+            "density": 2000,  # kg / m^3
             "grid_v_damping_scale": 1.1,  # 0.999,
         }
 
@@ -665,6 +666,9 @@ class Trainer:
 
         # Get material params
         density, youngs_modulus, ret_poisson, entropy = self.get_material_params(device)
+        
+        print(f"check youngs_modulus in get_simulation_input: {youngs_modulus.shape}, range {youngs_modulus.min().item()} - {youngs_modulus.max().item()}")  # range 1442228.0 - 105213600.0
+
         initial_position_time0 = self.particle_init_position.clone()
 
         query_mask = torch.logical_not(self.freeze_mask)
@@ -764,6 +768,12 @@ class Trainer:
         youngs_modulus = self.young_modulus.detach().clone()
         youngs_modulus[query_mask] += sim_params[..., 0]
 
+
+        # print(f"check youngs_modulus in get_material_params: \n self.young_modulus min {self.young_modulus.min()}, max {self.young_modulus.max()}, \n sim_params shape {sim_params.shape}, min {sim_params[..., 0].min()}, max {sim_params[..., 0].max()} \n youngs_modulus min {youngs_modulus.min()}, max {youngs_modulus.max()}") 
+        # self.young_modulus min 2140628.25, max 2140628.25,  # controlled by --initE
+        # sim_params shape torch.Size([5342, 1]), min -698400.1875, max 103072968.0  # --load_sim; otherwise 0
+        # youngs_modulus min 1442228.0, max 105213600.0
+
         # young_modulus = torch.exp(sim_params[..., 0]) + init_young
         youngs_modulus = torch.clamp(youngs_modulus, 1000.0, 5e8)
 
@@ -830,6 +840,7 @@ class Trainer:
             entropy,
         ) = self.get_simulation_input(device)
 
+
         init_velo_mean = particle_velo[query_mask, :].mean().item()
         init_velo_max = particle_velo[query_mask, :].max().item()
 
@@ -872,7 +883,7 @@ class Trainer:
             if start_time_idx != 0:
                 density, youngs_modulus, poisson, entropy = self.get_material_params(
                     device
-                )
+                ) # otherwise got error "Trying to backward through the graph a second time"
 
             if checkpoint_steps > 0 and checkpoint_steps < num_step_with_grad:
                 for time_step in range(0, num_step_with_grad, checkpoint_steps):
@@ -1210,6 +1221,10 @@ class Trainer:
                     # self.test()
             # self.accelerator.wait_for_everyone()
             self.step += 1
+            
+            # clear the cache
+            gc.collect()
+            torch.cuda.empty_cache()
         if self.accelerator.is_main_process:
             self.save()
 

@@ -302,7 +302,8 @@ class MPMWARPDiff(object):
                 output_path = pos_path.replace("_pos.npy", f"_grid_vin_afextra_{i}_{substep_local}.npy")
                 np.save(output_path, mpm_state.grid_v_in.numpy())
         
-        # grid_m_arr = mpm_state.grid_m.numpy()
+        grid_m_arr = mpm_state.grid_m.numpy()
+
         # if not (grid_m_arr>=0).all():
         #     print(f"get negative grid_m after extra_operation {grid_m_arr.min()}")
         #     pdb.set_trace()

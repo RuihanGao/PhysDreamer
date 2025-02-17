@@ -46,7 +46,7 @@ simulate_cfg = {
     "substep": 768,
     "grid_size": 64,
     "init_young": 2140628.25,  # save the initialized young's modulus, since optimized
-    "downsample_scale": 0.1,  # downsample the points to speed up the simulation
+    # "downsample_scale": 0.1,  # downsample the points to speed up the simulation
 }
 
 

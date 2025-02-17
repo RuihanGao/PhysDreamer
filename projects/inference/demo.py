@@ -58,6 +58,7 @@ from physdreamer.local_utils import (
 )
 from config_demo import DemoParams
 from physdreamer.utils.io_utils import save_video_mediapy
+from physdreamer.gaussian_3d.gaussian_renderer.feat_render import render_feat_gaussian
 import pdb
 
 
@@ -468,6 +469,9 @@ class Trainer:
         """
 
         density, youngs_modulus, ret_poisson = self.get_material_params(device)
+                
+        print(f"check youngs_modulus in get_simulation_input: {youngs_modulus.shape}, range {youngs_modulus.min().item()} - {youngs_modulus.max().item()}") #  1417130.5 - 105582136.0
+
         initial_position_time0 = self.particle_init_position.clone()
 
         query_mask = torch.logical_not(self.freeze_mask)
@@ -516,6 +520,12 @@ class Trainer:
         sim_params = sim_params * 1000
         youngs_modulus = self.young_modulus.detach().clone()
         youngs_modulus += sim_params[..., 0]
+
+        # print(f"check youngs_modulus in get_material_params: \n self.young_modulus min {self.young_modulus.min()}, max {self.young_modulus.max()}, \n sim_params shape {sim_params.shape}, min {sim_params[..., 0].min()}, max {sim_params[..., 0].max()} \n youngs_modulus min {youngs_modulus.min()}, max {youngs_modulus.max()}") 
+        # self.young_modulus min 2140628.25, max 2140628.25, 
+        # sim_params shape torch.Size([13356, 1]), min -723497.6875, max 103441504.0 
+        # youngs_modulus min 1417130.5, max 105582136.0
+
 
         # clamp youngs modulus
         youngs_modulus = torch.clamp(youngs_modulus, 1.0, 5e8)
@@ -676,6 +686,45 @@ class Trainer:
         print(f"vx range: {init_velocity[:, 0].min()}, {init_velocity[:, 0].max()}, vy range: {init_velocity[:, 1].min()}, {init_velocity[:, 1].max()}, vz range: {init_velocity[:, 2].min()}, {init_velocity[:, 2].max()}") 
         # vx range: -0.24438084661960602, -0.1958092898130417, vy range: 0.19218483567237854, 0.23882806301116943, vz range: -0.15181176364421844, -0.12185412645339966
 
+        # add visualization of youngs_modulus (modified from train_material.py)
+        youngs_norm = youngs_modulus - youngs_modulus.min() + 1e-2
+        young_color = youngs_norm / torch.quantile(youngs_norm, 0.99)
+        young_color = torch.clamp(young_color, 0.0, 1.0)
+        young_color[self.freeze_mask] = 0.0
+        queryed_young_color = young_color[self.top_k_index]  # [n_raw, topk]
+        young_color = queryed_young_color.mean(dim=-1)
+
+        young_color_full = torch.ones_like(
+            self.render_params.gaussians._xyz[:, 0]
+        )
+
+        young_color_full[self.sim_mask_in_raw_gaussian] = young_color
+        young_color = torch.stack(
+            [young_color_full, young_color_full, young_color_full], dim=-1
+        )
+
+        young_img = render_feat_gaussian(
+            cam,
+            self.render_params.gaussians,
+            self.render_params.render_pipe,
+            self.render_params.bg_color,
+            young_color,
+        )["render"]
+        young_img = (
+            (young_img.detach().cpu().numpy() * 255.0)
+            .astype(np.uint8)
+            .transpose(1, 2, 0)
+        )
+        # save the image
+        young_img_path = os.path.join(result_dir, save_name + "_youngs.png")
+        from PIL import Image
+        young_im = Image.fromarray(young_img)
+        young_im.save(young_img_path)
+        # save the raw value of youngs_modulus as npy
+        youngs_modulus_path = os.path.join(result_dir, save_name + "_youngs.npy")
+        youngs_modulus_np = youngs_modulus.detach().cpu().numpy()
+        np.save(youngs_modulus_path, youngs_modulus_np)
+        print(f"Save youngs_modulus to {youngs_modulus_path}")
 
         # step-1 Setup simulation parameters. External force, or initial velocity.
         #   if --apply_force, we will apply a constant force to points close to the force center
@@ -769,7 +818,7 @@ class Trainer:
                         device=device,
                         i=i, 
                         substep_local=substep_local,
-                        pos_path=pos_path
+                        pos_path=pos_path,
                     )
                     prev_state = next_state
 

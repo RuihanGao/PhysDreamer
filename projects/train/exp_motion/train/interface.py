@@ -650,7 +650,7 @@ class MPMDifferentiableSimulationClean(autograd.Function):
                 # particle_v_list.append(wp.to_torch(prev_state.particle_v).clone().detach().cpu().numpy())
                 next_state = prev_state.partial_clone(requires_grad=True)
                 # print(f"prev_state particle_v \n {prev_state.particle_v.numpy()}")
-                mpm_solver.p2g2p_differentiable(mpm_model, prev_state, next_state, substep_size, device=device)
+                mpm_solver.p2g2p_differentiable(mpm_model, prev_state, next_state, substep_size, device=device, i=step, substep_local=substep_local)
                 # print(f"next_state particle_v \n {next_state.particle_v.numpy()}")
                 next_state_list.append(next_state)
                 prev_state = next_state
