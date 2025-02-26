@@ -67,12 +67,15 @@ class DemoParams(object):
         eval_ys: float = 1.0,
         force_id: int = 0,
         force_mag: float = 1.0,
+        force_duration: float = 0.75,
+        force_radius: float = 0.1,
         velo_scaling: float = 3.0,
         point_id: int = 0,
         cam_id: int = 0,
         apply_force: bool = False,
         hide_force: bool = False,
         postfix="",
+
     ):
         if demo_name == "None":
             demo_name = None
@@ -85,8 +88,8 @@ class DemoParams(object):
             cfg["force"] = self.force_directions[force_id] * force_mag
             cfg["camera_cfg"] = self.camera_cfg_list[cam_id]
             cfg["cam_id"] = cam_id
-            cfg["force_duration"] = 0.75
-            cfg["force_radius"] = 0.1
+            cfg["force_duration"] = force_duration
+            cfg["force_radius"] = force_radius
             cfg["substep"] = self.simulate_cfg["substep"]
             cfg["grid_size"] = self.simulate_cfg["grid_size"]
             cfg["total_time"] = 5

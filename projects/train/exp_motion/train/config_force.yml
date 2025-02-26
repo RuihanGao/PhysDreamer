@@ -13,6 +13,6 @@ velo_dir: [
 # add configuration for force
 center_point: [0.076272, 0.848310, 0.074134] # top of the flower
 force_dir: [1.0, 0.0, 0.0]
-force_mag: 5e-6
+force_mag: 1e-5
 force_duration: 0.75
 force_radius: 0.1

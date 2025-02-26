@@ -92,6 +92,11 @@ from interface import (
 from motionrep.utils.io_utils import save_video_imageio, save_gif_imageio
 import gc
 
+# sys.path.append("/data/ruihan/projects/PhysDreamer/physdreamer/ChamferDistancePytorch")
+# import chamfer3D.dist_chamfer_3D, fscore
+
+from pytorch3d.loss import chamfer_distance
+
 logger = get_logger(__name__, log_level="INFO")
 
 model_dict = {
@@ -146,7 +151,7 @@ class Trainer:
     def __init__(self, args):
         self.args = args
 
-        self.ssim = args.ssim
+        # self.ssim = args.ssim
         args.warmup_step = int(args.warmup_step * args.gradient_accumulation_steps)
         args.train_iters = int(args.train_iters * args.gradient_accumulation_steps)
         os.environ["WANDB__SERVICE_WAIT"] = "600"
@@ -190,7 +195,8 @@ class Trainer:
         logger.info(accelerator.state, main_process_only=False)
 
         set_seed(args.seed + accelerator.process_index)
-        print("process index", accelerator.process_index)
+        print(f"check seed {args.seed} + {accelerator.process_index}")
+
         if accelerator.is_main_process:
             output_path = os.path.join(logging_dir, f"seed{args.seed}")
             os.makedirs(output_path, exist_ok=True)
@@ -257,11 +263,25 @@ class Trainer:
         self.accelerator = accelerator
         # init traiable params
         self.initE = args.initE
-        E_nu_list = self.init_trainable_params()
-        for p in E_nu_list:
-            p.requires_grad = True
+        self.homo_material = args.homo_material
+        E_nu_list = self.init_trainable_params(poisson_numpy=0.3)
+
         self.E_nu_list = E_nu_list
-        print(f"check E_nu_list: {E_nu_list}")
+        self.FD_disturb_E = args.FD_disturb_E
+        self.E_nu_list[0] += self.FD_disturb_E
+
+        if self.homo_material:
+            # change to train E only
+            E_nu_list[0].requires_grad = True
+            E_nu_list[1].requires_grad = False
+        else:
+            # original implementation of PhysDreamer
+            for p in E_nu_list:
+                p.requires_grad = True
+
+
+        print(f"FD_disturb_E: {args.FD_disturb_E} check E_nu_list: {E_nu_list}") # tensor([5000000.], device='cuda:0', requires_grad=True), tensor(0.3146, device='cuda:0', requires_grad=True)]
+        # pdb.set_trace()  
 
         self.model = accelerator.prepare(self.model)
         self.setup_simulation(dataset_dir, grid_size=args.grid_size)
@@ -272,16 +292,30 @@ class Trainer:
             if args.video_dir_name in model_dict:
                 args.checkpoint_path = model_dict[args.video_dir_name]
             self.load(args.checkpoint_path)
-            trainable_params = list(self.sim_fields.parameters()) + self.E_nu_list
-            optim_list = [
-                {"params": self.E_nu_list, "lr": args.lr * 1e-10},
-                {
-                    "params": self.sim_fields.parameters(),
-                    "lr": args.lr,
-                    "weight_decay": 1e-4,
-                },
-                # {"params": self.velo_fields.parameters(), "lr": args.lr * 1e-3, "weight_decay": 1e-4},
-            ]
+            print(f"Load checkpoint from {args.checkpoint_path}")
+
+            if self.homo_material:
+                trainable_params = self.E_nu_list
+                optim_list = [
+                    {"params": self.E_nu_list, "lr": args.lr},
+                    # {
+                    #     "params": self.sim_fields.parameters(),
+                    #     "lr": args.lr,
+                    #     "weight_decay": 1e-4,
+                    # },
+                ]
+
+            else:
+                trainable_params = list(self.sim_fields.parameters()) + self.E_nu_list
+                optim_list = [
+                    {"params": self.E_nu_list, "lr": args.lr * 1e-10},
+                    {
+                        "params": self.sim_fields.parameters(),
+                        "lr": args.lr,
+                        "weight_decay": 1e-4,
+                    },
+                    # {"params": self.velo_fields.parameters(), "lr": args.lr * 1e-3, "weight_decay": 1e-4},
+                ]
 
             if args.update_velo:
                 self.freeze_velo = False
@@ -306,15 +340,28 @@ class Trainer:
                 self.freeze_velo = True
                 self.velo_optimizer = None
         else:
-            trainable_params = list(self.sim_fields.parameters()) + self.E_nu_list
-            optim_list = [
-                {"params": self.E_nu_list, "lr": args.lr * 1e-10},
-                {
-                    "params": self.sim_fields.parameters(),
-                    "lr": args.lr,
-                    "weight_decay": 1e-4,
-                },
-            ]
+            if self.homo_material:
+                trainable_params = self.E_nu_list
+                optim_list = [
+                    {"params": self.E_nu_list, "lr": args.lr},
+                    # {
+                    #     "params": self.sim_fields.parameters(),
+                    #     "lr": args.lr,
+                    #     "weight_decay": 1e-4,
+                    # },
+                ]
+
+            else:
+                trainable_params = list(self.sim_fields.parameters()) + self.E_nu_list
+                optim_list = [
+                    {"params": self.E_nu_list, "lr": args.lr * 1e-10},
+                    {
+                        "params": self.sim_fields.parameters(),
+                        "lr": args.lr,
+                        "weight_decay": 1e-4,
+                    },
+                ]
+        
             self.freeze_velo = False
             self.window_size_schduler.warmup_step = 800
 
@@ -344,6 +391,8 @@ class Trainer:
             lr=args.lr,
             weight_decay=0.0,
         )
+
+
         self.trainable_params = trainable_params
         self.scheduler = get_linear_schedule_with_warmup(
             optimizer=self.optimizer,
@@ -358,7 +407,15 @@ class Trainer:
         # setup train info
         self.step = 0
         self.batch_size = args.batch_size
-        self.tv_loss_weight = args.tv_loss_weight
+        # self.tv_loss_weight = args.tv_loss_weight
+
+        # add loss lambdas
+        self.lambda_img_l2 = args.lambda_img_l2
+        self.lambda_img_ssim = args.lambda_img_ssim
+        self.lambda_img_entropy = args.lambda_img_entropy
+        self.lambda_img_smoothness = args.lambda_img_smoothness
+        self.lambda_pos_l2 = args.lambda_pos_l2
+        self.lambda_pos_chamfer = args.lambda_pos_chamfer
 
         self.log_iters = args.log_iters
         self.wandb_iters = args.wandb_iters
@@ -395,10 +452,13 @@ class Trainer:
             self.force_mag = args.force_mag
             self.force_duration = args.force_duration
             self.force_radius = args.force_radius
+
+        
             
 
     def init_trainable_params(
         self,
+        poisson_numpy=None
     ):
 
         # init young modulus and poisson ratio
@@ -406,14 +466,17 @@ class Trainer:
         young_numpy = np.exp(np.random.uniform(np.log(1e-3), np.log(1e3))).astype(
             np.float32
         )
-
-        young_numpy = np.array([self.initE]).astype(np.float32)
+        
+        if self.homo_material:
+            young_numpy = self.initE
+        else:
+            young_numpy = np.array([self.initE]).astype(np.float32)
 
         young_modulus = torch.tensor(young_numpy, dtype=torch.float32).to(
             self.accelerator.device
         )
 
-        poisson_numpy = np.random.uniform(0.1, 0.4)
+        poisson_numpy = np.random.uniform(0.1, 0.4) if poisson_numpy is None else poisson_numpy
         poisson_ratio = torch.tensor(poisson_numpy, dtype=torch.float32).to(
             self.accelerator.device
         )
@@ -500,9 +563,26 @@ class Trainer:
         # point cloud resample with kmeans
 
         downsample_scale = self.args.downsample_scale
-        num_cluster = int(sim_xyzs.shape[0] * downsample_scale)
-        print(f"Before downsample: {sim_xyzs.shape[0]}, num_cluster: {num_cluster}")
-        sim_xyzs = downsample_with_kmeans_gpu(sim_xyzs, num_cluster) # downsample the simulated particles for faster simulation
+        if self.args.downsample_scale < 1:
+            num_cluster = int(sim_xyzs.shape[0] * downsample_scale)
+            print(f"Before downsample: {sim_xyzs.shape[0]}, num_cluster: {num_cluster}")
+            sim_xyzs = downsample_with_kmeans_gpu(sim_xyzs, num_cluster) # downsample the simulated particles for faster simulation
+
+            # # save the downsampled points for visualization
+            # downsampled_points_path = os.path.join(dataset_dir, "downsampled_points_train.npy")
+            # downsampled_points = sim_xyzs.clone().detach().cpu().numpy()
+            # np.save(downsampled_points_path, downsampled_points)
+            # print(f"Save downsampled points to {downsampled_points_path}")
+            # from pytorch3d.io import save_ply
+            # save_ply(downsampled_points_path.replace(".npy", ".ply"), verts=torch.from_numpy(downsampled_points))
+            # pdb.set_trace()
+        else:
+            # without downsampling, use the filtered clean points as the simulation points
+            print(f"Use the filtered clean points as the simulation points")
+            sim_xyzs = self.clean_xyzs.clone()
+            sim_xyzs = (sim_xyzs + shift) / scale
+            print(f"check sim_xyzs range: {sim_xyzs.min()}, {sim_xyzs.max()}, shape {sim_xyzs.shape}")
+            # check sim_xyzs range: 0.14057305455207825, 0.6914111971855164, shape torch.Size([5337, 3])
 
 
         sim_gaussian_pos = self.render_params.gaussians.get_xyz.detach().clone()[
@@ -600,7 +680,7 @@ class Trainer:
             num_freeze_pts.item(),
             "num moving pts",
             num_particles - num_freeze_pts.item(),
-        )
+        ) # num freeze pts in total 457 num moving pts 4885
 
         # init fields for simulation, e.g. density, external force, etc.
 
@@ -611,7 +691,7 @@ class Trainer:
         )
         youngs_modulus = (
             torch.ones_like(self.particle_init_position[..., 0])
-            * self.E_nu_list[0].detach()
+            * self.E_nu_list[0].detach() * 1e7
         )
         poisson_ratio = torch.ones_like(self.particle_init_position[..., 0]) * 0.3
 
@@ -667,7 +747,7 @@ class Trainer:
         # Get material params
         density, youngs_modulus, ret_poisson, entropy = self.get_material_params(device)
         
-        print(f"check youngs_modulus in get_simulation_input: {youngs_modulus.shape}, range {youngs_modulus.min().item()} - {youngs_modulus.max().item()}")  # range 1442228.0 - 105213600.0
+        print(f"check youngs_modulus in get_simulation_input: {youngs_modulus.shape}, range {youngs_modulus.min().item()} - {youngs_modulus.max().item()}")  # pretrained material: range 1442228.0 - 105213600.0
 
         initial_position_time0 = self.particle_init_position.clone()
 
@@ -769,7 +849,9 @@ class Trainer:
         youngs_modulus[query_mask] += sim_params[..., 0]
 
 
-        # print(f"check youngs_modulus in get_material_params: \n self.young_modulus min {self.young_modulus.min()}, max {self.young_modulus.max()}, \n sim_params shape {sim_params.shape}, min {sim_params[..., 0].min()}, max {sim_params[..., 0].max()} \n youngs_modulus min {youngs_modulus.min()}, max {youngs_modulus.max()}") 
+        print(f"check youngs_modulus in get_material_params: \n self.young_modulus min {self.young_modulus.min()}, max {self.young_modulus.max()}, \n sim_params shape {sim_params.shape}, min {sim_params[..., 0].min()}, max {sim_params[..., 0].max()} \n youngs_modulus min {youngs_modulus.min()}, max {youngs_modulus.max()}") 
+        # pdb.set_trace()
+
         # self.young_modulus min 2140628.25, max 2140628.25,  # controlled by --initE
         # sim_params shape torch.Size([5342, 1]), min -698400.1875, max 103072968.0  # --load_sim; otherwise 0
         # youngs_modulus min 1442228.0, max 105213600.0
@@ -795,9 +877,14 @@ class Trainer:
 
         gt_videos = data["video_clip"][0, 1 : self.num_frames, ...]
         print(f"check video data: video_clip {data['video_clip'].shape}, gt_videos {gt_videos.shape}")
-        # video_clip torch.Size([1, 25, 3, 576, 1024]), gt_videos torch.Size([13, 3, 576, 1024])
+        # video_clip torch.Size([1, 91, 3, 576, 1024]), gt_videos torch.Size([13, 3, 576, 1024])
 
-        window_size = int(self.window_size_schduler.compute_state(self.step)[0]) # number of frames to run simulation in this training iteration
+        gt_pos = data["gt_pos"][0, 1:, ...] # torch.Size([1, 91, 5342, 3]) -> [90, 5342, 3]
+        print(f"check loading gt pos in train_one_step: {gt_pos.shape}") # torch.Size([1, 91, 5342, 3])
+
+        # window_size = int(self.window_size_schduler.compute_state(self.step)[0]) # number of frames to run simulation in this training iteration
+        # 2025-02-25 For debugging purpose, fix the window_size to 1
+        window_size = 1
         print(f"window_size {window_size}") 
         stop_velo_opt_thres = 15
         do_velo_opt = not self.freeze_velo
@@ -810,12 +897,16 @@ class Trainer:
         rendered_video_list = []
         rendered_video_w_force_list = []
         log_loss_dict = {
+            "psnr": [],
             "loss": [],
             "l2_loss": [],
-            "psnr": [],
             "ssim": [],
+            "sm_loss": [],
             "entropy": [],
+            "pos_L2_loss": [],
+            "pos_chamfer_loss": [],
         }
+
         log_psnr_dict = {}
 
         particle_pos = self.particle_init_position.clone()
@@ -879,6 +970,9 @@ class Trainer:
             num_step_with_grad = num_substeps * (end_time_idx - start_time_idx) # ~= num_substeps per stage
 
             gt_frame = gt_videos[[end_time_idx - 1]]
+            gt_pos_frame = gt_pos[end_time_idx - 1]
+            # print(f"check the total number of frames in gt_videos: {gt_videos.shape}, gt_pos {gt_pos.shape}, gt_frame {gt_frame.shape}, gt_pos_frame {gt_pos_frame.shape}") # [13, 3, 576, 1024], [90, 5337, 3], [1, 3, 576, 1024], [5337, 3]
+            # pdb.set_trace()
 
             if start_time_idx != 0:
                 density, youngs_modulus, poisson, entropy = self.get_material_params(
@@ -890,13 +984,82 @@ class Trainer:
                     num_step = min(num_step_with_grad - time_step, checkpoint_steps)
                     if num_step == 0:
                         break
-                    particle_pos, particle_velo, particle_F, particle_C = (
-                        MPMDifferentiableSimulationWCheckpoint.apply(
+                    if self.homo_material:
+                        particle_pos, particle_velo, particle_F, particle_C = (
+                            MPMDifferentiableSimulationWCheckpoint.apply(
+                                self.mpm_solver,
+                                self.mpm_state,
+                                self.mpm_model,
+                                substep_size,
+                                num_step,
+                                particle_pos,
+                                particle_velo,
+                                particle_F,
+                                particle_C,
+                                self.E_nu_list[0]*1e7,
+                                self.E_nu_list[1],
+                                density,
+                                query_mask,
+                                device,
+                                True,
+                                0,
+                            )
+                        )
+
+                    else:
+                        particle_pos, particle_velo, particle_F, particle_C = (
+                            MPMDifferentiableSimulationWCheckpoint.apply(
+                                self.mpm_solver,
+                                self.mpm_state,
+                                self.mpm_model,
+                                substep_size,
+                                num_step,
+                                particle_pos,
+                                particle_velo,
+                                particle_F,
+                                particle_C,
+                                youngs_modulus,
+                                self.E_nu_list[1],
+                                density,
+                                query_mask,
+                                device,
+                                True,
+                                0,
+                            )
+                        )
+
+            else:
+                if self.homo_material:
+                    particle_pos, particle_velo, particle_F, particle_C, particle_cov = (
+                    MPMDifferentiableSimulationClean.apply(
+                        self.mpm_solver,
+                        self.mpm_state,
+                        self.mpm_model,
+                        substep_size,
+                        num_step_with_grad,
+                        particle_pos,
+                        particle_velo,
+                        particle_F,
+                        particle_C,
+                        self.E_nu_list[0]*1e7,
+                        self.E_nu_list[1],
+                        density,
+                        query_mask,
+                        device,
+                        True,
+                        0,
+                        start_time_idx,
+                        self.step,
+                    )
+                )
+                else:
+                    particle_pos, particle_velo, particle_F, particle_C, particle_cov = (
+                        MPMDifferentiableSimulationClean.apply(
                             self.mpm_solver,
                             self.mpm_state,
                             self.mpm_model,
                             substep_size,
-                            num_step,
+                            num_step_with_grad,
                             particle_pos,
                             particle_velo,
                             particle_F,
@@ -908,31 +1071,10 @@ class Trainer:
                             device,
                             True,
                             0,
+                            start_time_idx,
+                            self.step,
                         )
                     )
-            else:
-                particle_pos, particle_velo, particle_F, particle_C, particle_cov = (
-                    MPMDifferentiableSimulationClean.apply(
-                        self.mpm_solver,
-                        self.mpm_state,
-                        self.mpm_model,
-                        substep_size,
-                        num_step_with_grad,
-                        particle_pos,
-                        particle_velo,
-                        particle_F,
-                        particle_C,
-                        youngs_modulus,
-                        self.E_nu_list[1],
-                        density,
-                        query_mask,
-                        device,
-                        True,
-                        0,
-                        start_time_idx,
-                        self.step,
-                    )
-                )
 
             # substep-3: render gaussian
             gaussian_pos = particle_pos * self.scale - self.shift
@@ -950,11 +1092,6 @@ class Trainer:
                 [disp_offset],
                 self.sim_mask_in_raw_gaussian,
             )
-
-            # print(f'step {self.step}, start_time_idx {start_time_idx}, check simulated_video {simulated_video.shape}, gt_frame {gt_frame.shape}')
-            # print(f"check particle_v in simualted_video")
-            # print(self.mpm_state.particle_v.numpy())
-            # pdb.set_trace()
 
             # if self.apply_force:
             #     simulate_video_w_force = render_gaussian_seq_w_mask_cam_seq_with_force_with_disp(
@@ -975,27 +1112,106 @@ class Trainer:
             # if self.apply_force:
             #     rendered_video_w_force_list.append(simulate_video_w_force)
 
-            l2_loss = 0.5 * F.mse_loss(simulated_video, gt_frame, reduction="mean")
-            ssim_loss = compute_ssim(simulated_video, gt_frame)
-            loss = l2_loss * (1.0 - self.ssim) + (1.0 - ssim_loss) * self.ssim
+            # Compute loss
+            loss = 0.0
+            # l2_loss = 0.5 * F.mse_loss(simulated_video, gt_frame, reduction="mean")
+            # loss = l2_loss * (1.0 - self.ssim) + (1.0 - ssim_loss) * self.ssim
+            if self.lambda_img_l2 > 0:
+                l2_loss = F.mse_loss(simulated_video, gt_frame, reduction="mean")
+                loss += self.lambda_img_l2 * l2_loss
+
+                if self.step < 1:
+                    # save each frame as image for visualization
+                    # print(f"check shape simulated_video {simulated_video.shape}, gt_frame {gt_frame.shape}") # [1, 3, 576, 1024], [1, 3, 576, 1024]
+                    # print(f"check range simulated_video {simulated_video.min().item()} - {simulated_video.max().item()}, gt_frame {gt_frame.min().item()} - {gt_frame.max().item()}") # simulated_video 0.019882982596755028 - 0.9924777150154114, gt_frame 0.0 - 1.0
+                    simulated_video_path = os.path.join(self.output_path, f"simulated_frame_{self.step:06d}_{start_time_idx:02d}.png")
+                    gt_frame_path = os.path.join(self.output_path, f"gt_frame_{self.step:06d}_{start_time_idx:02d}.png")
+                    simulated_video_img = simulated_video[0].detach().cpu().numpy().transpose(1, 2, 0)
+                    gt_frame_img = gt_frame[0].detach().cpu().numpy().transpose(1, 2, 0)
+                    simulated_video_img = Image.fromarray((simulated_video_img * 255).astype(np.uint8))
+                    gt_frame_img = Image.fromarray((gt_frame_img * 255).astype(np.uint8))
+                    simulated_video_img.save(simulated_video_path)
+                    gt_frame_img.save(gt_frame_path)       
+            else:
+                l2_loss = torch.tensor(0.0)
+
+            if self.lambda_img_ssim > 0:            
+                ssim_loss = compute_ssim(simulated_video, gt_frame)
+                loss += self.lambda_img_ssim * (1.0 - ssim_loss)
+            else:
+                ssim_loss = torch.tensor(0.0)
 
             loss = loss * (self.args.loss_decay**end_time_idx)
-            sm_velo_loss = self.velo_fields.compute_smoothess_loss() * 10.0
-            if not (do_velo_opt and start_time_idx == 0):
-                sm_velo_loss = sm_velo_loss.detach()
 
-            sm_spatial_loss = self.sim_fields.compute_smoothess_loss()
+            if self.lambda_img_smoothness > 0:
+                sm_velo_loss = self.velo_fields.compute_smoothess_loss() * 10.0
+                # if not (do_velo_opt and start_time_idx == 0):
+                #     sm_velo_loss = sm_velo_loss.detach()
+                sm_spatial_loss = self.sim_fields.compute_smoothess_loss()
 
-            sm_loss = (
-                sm_velo_loss + sm_spatial_loss
-            )  # typically 20 times larger than rendering loss
+                if do_velo_opt and start_time_idx == 0:
+                    sm_loss = (
+                        sm_velo_loss + sm_spatial_loss
+                    )  # typically 20 times larger than rendering loss
+                else:
+                    sm_loss = sm_spatial_loss
 
-            loss = loss + sm_loss * self.tv_loss_weight
-            loss = loss + entropy * self.args.entropy_reg
+                # loss = loss + sm_loss * self.tv_loss_weight
+                loss += self.lambda_img_smoothness * sm_loss
+            else:
+                sm_spatial_loss = torch.tensor(0.0)
+                sm_velo_loss = torch.tensor(0.0)
+                sm_loss = torch.tensor(0.0)
+            
+            if self.lambda_img_entropy > 0:
+                # loss = loss + entropy * self.args.entropy_reg
+                loss += self.lambda_img_entropy * entropy
+            else:
+                entropy = torch.tensor(0.0)
+            
+            if self.lambda_pos_l2 > 0:
+                # L2 loss
+                pos_L2_loss = F.mse_loss(gaussian_pos, gt_pos_frame)
+
+                # TODO: 2025-02-25: verify the gradient computation with finite difference
+                pos_L2_loss = F.mse_loss(gaussian_pos, gt_pos_frame, reduction="none")
+                print(f"compute the pos_L2_loss, pos_L2_loss shape {pos_L2_loss.shape}, mean {pos_L2_loss.mean().item()}")
+                # save the pos_L2_loss for logging 
+                pos_L2_loss_np = pos_L2_loss.detach().cpu().numpy()
+                pos_L2_loss_path = os.path.join(self.output_path, f"pos_L2_loss_{self.step:06d}_{start_time_idx:02d}_FD_h_{self.FD_disturb_E}.npy")
+                np.save(pos_L2_loss_path, pos_L2_loss_np)
+                pos_L2_loss = pos_L2_loss.mean()
+                if self.step > 3:
+                    pdb.set_trace()
+
+                
+                loss += self.lambda_pos_l2 * pos_L2_loss
+
+                if self.step < 1:
+                    # save the gaussian_pos and gt_pos for visualization
+                    gaussian_pos_path = os.path.join(self.output_path, f"gaussian_pos_{self.step:06d}_{start_time_idx:02d}.npy")
+                    gt_pos_path = os.path.join(self.output_path, f"gt_pos_{self.step:06d}_{start_time_idx:02d}.npy")
+                    np.save(gaussian_pos_path, gaussian_pos.detach().cpu().numpy())
+                    np.save(gt_pos_path, gt_pos_frame.detach().cpu().numpy())
+                
+            else:
+                pos_L2_loss = torch.tensor(0.0)
+
+            
+            if self.lambda_pos_chamfer > 0:
+                # print(f"compute position loss, gaussian_pos shape {gaussian_pos.shape}, gt_pos_frame shape {gt_pos_frame.shape}") # [5342, 3], [5342, 3]
+                pos_chamfer_loss, _ = chamfer_distance(gaussian_pos.unsqueeze(0), gt_pos_frame.unsqueeze(0))
+                loss += self.lambda_pos_chamfer * pos_chamfer_loss
+            else:
+                pos_chamfer_loss = torch.tensor(0.0)
+
+
+
+            # divide d the eentire loss by accumulateive size
             loss = loss / self.args.compute_window
-            print(f"check loss details, sm_velo_loss {sm_velo_loss.item()}, sm_spatial_loss {sm_spatial_loss.item()}, entropy {entropy.item()}, l2_loss {l2_loss.item()}, ssim_loss {ssim_loss.item()}, loss {loss.item()}")
-            print(f"step: {self.step}, start_time_idx {start_time_idx}, check loss before backward {loss.item()}")
-            # pdb.set_trace()
+
+            print(f"check loss details, img_l2_loss {l2_loss.item()}, pos_L2_loss {pos_L2_loss.item()}, pos_chamfer_loss {pos_chamfer_loss.item()}, sm_spatial_loss {sm_spatial_loss.item()}, sm_velo_loss {sm_velo_loss.item()}, entropy {entropy.item()}, loss {loss.item()}")
+
             loss.backward()
 
             # from IPython import embed; embed()
@@ -1010,19 +1226,22 @@ class Trainer:
 
             with torch.no_grad():
                 psnr = compute_psnr(simulated_video, gt_frame).mean()
+                log_loss_dict["psnr"].append(psnr.item())
                 log_loss_dict["loss"].append(loss.item())
                 log_loss_dict["l2_loss"].append(l2_loss.item())
-                log_loss_dict["psnr"].append(psnr.item())
                 log_loss_dict["ssim"].append(ssim_loss.item())
+                log_loss_dict["sm_loss"].append(sm_loss.item())
                 log_loss_dict["entropy"].append(entropy.item())
+                log_loss_dict["pos_L2_loss"].append(pos_L2_loss.item())
+                log_loss_dict["pos_chamfer_loss"].append(pos_chamfer_loss.item())
 
                 print(
-                    f"step {self.step}, start_time_idx {start_time_idx}, psnr {psnr.item()}, end_time_idx {end_time_idx}, youngs_modulus max {youngs_modulus.max().item()}, density max {density.max().item()}"
+                    f"step {self.step}, start_time_idx {start_time_idx}, psnr {psnr.item()}, end_time_idx {end_time_idx}, youngs_modulus max {youngs_modulus.max().item()} min {youngs_modulus.min().item()}"
                 )
                 log_psnr_dict["psnr_frame_{}".format(end_time_idx)] = psnr.item()
                 # print(psnr.item(), end_time_idx, youngs_modulus.max().item(), density.max().item())
 
-        nu_grad_norm = self.E_nu_list[1].grad.norm(2).item()
+        # nu_grad_norm = self.E_nu_list[1].grad.norm(2).item()
         spatial_grad_norm = 0
         for p in self.sim_fields.parameters():
             if p.grad is not None:
@@ -1079,6 +1298,8 @@ class Trainer:
 
             # pdb.set_trace()
 
+            print(f"check E_nu_list before optimizer update: {self.E_nu_list[0].item()}, {self.E_nu_list[1].item()}")
+            print(f"optimizer step ...")
             self.optimizer.step()
             self.optimizer.zero_grad()
             if do_velo_opt:
@@ -1093,8 +1314,10 @@ class Trainer:
                 self.velo_scheduler.step()
             with torch.no_grad():
                 # TODO: check the clipping range. make sure it is consistent with the scale of parameter during material modeling
-                self.E_nu_list[0].data.clamp_(1e-1, 1e8)
+                print(f"check E_nu_list before clipping: {self.E_nu_list[0].item()}, {self.E_nu_list[1].item()}")
+                self.E_nu_list[0].data.clamp_(1e-2, 1e8)
                 self.E_nu_list[1].data.clamp_(1e-2, 0.449)
+                print(f"check E_nu_list after clipping: {self.E_nu_list[0].item()}, {self.E_nu_list[1].item()}")
         self.scheduler.step()
 
         for k, v in log_loss_dict.items():
@@ -1104,12 +1327,14 @@ class Trainer:
         print(
             "nu: ",
             self.E_nu_list[1].item(),
-            nu_grad_norm,
+            # nu_grad_norm,
             spatial_grad_norm,
             velo_grad_norm,
             "young_mean, max:",
             youngs_modulus.mean().item(),
             youngs_modulus.max().item(),
+            "E: ",
+            self.E_nu_list[0].item(),
             do_velo_opt,
             "init_velo_mean:",
             init_velo_mean,
@@ -1118,7 +1343,7 @@ class Trainer:
         if accelerator.is_main_process and (self.step % self.wandb_iters == 0):
             with torch.no_grad():
                 wandb_dict = {
-                    "nu_grad_norm": nu_grad_norm,
+                    # "nu_grad_norm": nu_grad_norm,
                     "spatial_grad_norm": spatial_grad_norm,
                     "velo_grad_norm": velo_grad_norm,
                     "nu": self.E_nu_list[1].item(),
@@ -1131,6 +1356,8 @@ class Trainer:
                     "max_particle_velo": particle_velo.max().item(),
                     "init_velo_mean": init_velo_mean,
                     "init_velo_max": init_velo_max,
+                    "E_nu_list[0]": self.E_nu_list[0].item(),
+                    "E_nu_list[1]": self.E_nu_list[1].item(),
                 }
 
                 wandb_dict.update(log_psnr_dict)
@@ -1197,19 +1424,22 @@ class Trainer:
                         fps=simulated_video.shape[0],
                     )
 
-                    print(f"generate inference_video_v5_t3 for step {self.step}")
-                    simulated_video = self.inference(
-                        cam, velo_scaling=5.0, num_sec=3, substep=num_substeps
-                    )
-                    wandb_dict["inference_video_v5_t3"] = wandb.Video(
-                        simulated_video,
-                        fps=30,
-                    )
+                    # skip the rendering for faster debugging
+                    # print(f"generate inference_video_v5_t3 for step {self.step}")
+                    # simulated_video = self.inference(
+                    #     cam, velo_scaling=5.0, num_sec=3, substep=num_substeps
+                    # )
+                    # wandb_dict["inference_video_v5_t3"] = wandb.Video(
+                    #     simulated_video,
+                    #     fps=30,
+                    # )
 
                 if self.use_wandb:
                     wandb.log(wandb_dict, step=self.step)
 
         self.accelerator.wait_for_everyone()
+        # print(f"check result for step {self.step}")
+        # pdb.set_trace()
 
     def train(self):
         # might remove tqdm when multiple node
@@ -1390,7 +1620,7 @@ class Trainer:
             "load gaussians from: {}".format(gaussian_path),
             "... num gaussians: ",
             gaussians._xyz.shape[0],
-        )
+        ) # load gaussians from: ../../../../data/physics_dreamer/carnations/point_cloud.ply ... num gaussians:  1037279
         bg_color = [1, 1, 1] if white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         render_pipe = RenderPipe()
@@ -1420,7 +1650,10 @@ class Trainer:
         # add filled in points
         gaussian_dir = os.path.dirname(gaussian_path)
 
-        clean_points_path = os.path.join(gaussian_dir, "clean_object_points.ply")
+        # clean_points_path = os.path.join(gaussian_dir, "clean_object_points.ply")
+        # 2025-02-23: change the clean points to a downsampled ply and filtered out the points that are too far away due to downsampling process
+        clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered.ply")
+
         if os.path.exists(clean_points_path):
             clean_xyzs = pcu.load_mesh_v(clean_points_path)
             clean_xyzs = torch.from_numpy(clean_xyzs).float().to("cuda")
@@ -1617,7 +1850,6 @@ def parse_args():
     parser.add_argument("--zero_init", type=bool, default=True)
 
     parser.add_argument("--entropy_cls", type=int, default=-1)
-    parser.add_argument("--entropy_reg", type=float, default=1e-2)
 
     parser.add_argument("--num_frames", type=str, default=14)
 
@@ -1636,9 +1868,16 @@ def parse_args():
     parser.add_argument("--downsample_scale", type=float, default=0.04)
     parser.add_argument("--top_k", type=int, default=8)
 
-    # loss parameters
-    parser.add_argument("--tv_loss_weight", type=float, default=1e-4)
-    parser.add_argument("--ssim", type=float, default=0.9)
+    # loss parameters -- use consistent naming for each loss component
+    # parser.add_argument("--tv_loss_weight", type=float, default=1e-4) # total variance loss
+    # parser.add_argument("--ssim", type=float, default=0.9)
+    # parser.add_argument("--entropy_reg", type=float, default=1e-2)
+    parser.add_argument("--lambda_img_l2", type=float, default=0.0) # default 0.1
+    parser.add_argument("--lambda_img_ssim", type=float, default=0.0) # default 0.9
+    parser.add_argument("--lambda_img_entropy", type=float, default=0.0) # default 1e-2
+    parser.add_argument("--lambda_img_smoothness", type=float, default=0.0) # default 1e-4 
+    parser.add_argument("--lambda_pos_l2", type=float, default=0.0) # default 0
+    parser.add_argument("--lambda_pos_chamfer", type=float, default=0.0) # default 0
 
     # Logging and checkpointing
     parser.add_argument("--output_dir", type=str, default="../../output/inverse_sim")
@@ -1689,8 +1928,12 @@ def parse_args():
     parser.add_argument("--apply_force", action="store_true", default=False)
     parser.add_argument("--initE", type=float, default=1e5)
     parser.add_argument("--postfix", type=str, default="")
+    parser.add_argument("--homo_material", action="store_true", default=False, help="option to set homogeneous material, i.e. E is a float instead of spatial field")
+    parser.add_argument("--FD_disturb_E", type=float, default=0, help="a step size to disturb E to compute finite difference")
 
     args, extra_args = parser.parse_known_args()
+
+    args.postfix += f"_lambda_{args.lambda_img_l2}_{args.lambda_img_ssim}_{args.lambda_img_entropy}_{args.lambda_img_smoothness}_{args.lambda_pos_l2}_{args.lambda_pos_chamfer}_FD_{args.FD_disturb_E}"
     cfg = create_config(args.config, args, extra_args)
 
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))

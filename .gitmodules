@@ -1,3 +1,6 @@
 [submodule "projects/train/generative-models"]
 	path = projects/train/generative-models
 	url = https://github.com/Stability-AI/generative-models.git
+[submodule "projects/train/exp_motion/train/ChamferDistancePytorch"]
+	path = projects/train/exp_motion/train/ChamferDistancePytorch
+	url = https://github.com/ThibaultGROUEIX/ChamferDistancePytorch

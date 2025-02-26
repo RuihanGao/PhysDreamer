@@ -675,6 +675,8 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         ctx.tape = cond_tape.tape
 
         ctx.save_for_backward(query_mask)
+        ctx.step = step
+        ctx.start_time_idx = start_time_idx
 
         last_state = next_state
         particle_pos = wp.to_torch(last_state.particle_x).detach().clone()
@@ -693,9 +695,22 @@ class MPMDifferentiableSimulationClean(autograd.Function):
     def backward(ctx, out_pos_grad: Float[Tensor, "n 3"], out_velo_grad: Float[Tensor, "n 3"], 
                  out_F_grad: Float[Tensor, "n 9"], out_C_grad: Float[Tensor, "n 9"], out_cov_grad: Float[Tensor, "n 6"]):
 
-        print(f"in customize backward, out_pos_grad {out_pos_grad.sum()}, out_velo_grad {out_velo_grad.sum()}, out_F_grad {out_F_grad.sum()}, out_C_grad {out_C_grad.sum()}, out_cov_grad {out_cov_grad.sum()}")
+        print(f"in customize backward, check torch tensor shape, out_pos_grad {out_pos_grad.shape}, out_velo_grad {out_velo_grad.shape}, out_F_grad {out_F_grad.shape}, out_C_grad {out_C_grad.shape}, out_cov_grad {out_cov_grad.shape}")
+
         # pdb.set_trace()
-        
+
+        ### Trial Experiment Starts
+        postfix = "direct_backward"
+        # 2025-02-26 Implement direct backward through warp
+        ctx.prev_state.particle_x.grad = from_torch_safe(out_pos_grad, dtype=wp.vec3, requires_grad=True)
+        ctx.prev_state.particle_v.grad = from_torch_safe(out_velo_grad, dtype=wp.vec3, requires_grad=True)
+        ctx.prev_state.particle_F_trial.grad = from_torch_safe(out_F_grad, dtype=wp.mat33, requires_grad=True)
+        ctx.prev_state.particle_C.grad = from_torch_safe(out_C_grad, dtype=wp.mat33, requires_grad=True)
+        # ctx.prev_state.particle_cov.grad = from_torch_safe(out_cov_grad, dtype=wp.vec6, requires_grad=True) # gradient dossn't match
+        ctx.tape.backward()
+        ### Trial Experiment Ends
+
+
         num_particles = ctx.num_particles
         device = ctx.device
         mpm_solver, mpm_model = ctx.mpm_solver, ctx.mpm_model
@@ -706,7 +721,9 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         next_state = next_state_list[-1]
 
         query_mask = ctx.saved_tensors
-    
+
+
+        postfix = "_org"
         with wp.ScopedDevice(device):
             
             grad_pos_wp = from_torch_safe(out_pos_grad, dtype=wp.vec3, requires_grad=False)
@@ -740,11 +757,20 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         velo_grad = wp.to_torch(starting_state.particle_v.grad).detach().clone()
         F_grad = wp.to_torch(starting_state.particle_F_trial.grad).detach().clone()
         C_grad = wp.to_torch(starting_state.particle_C.grad).detach().clone()
-        # print(f"check grad after tape.backward")
-        # pdb.set_trace()
         
-        print(f"debug backward: pos_grad {pos_grad.abs().sum()}, velo_grad {velo_grad.abs().sum()}, F_grad {F_grad.abs().sum()}, C_grad {C_grad.abs().sum()}")
-        # pdb.set_trace()
+        
+        # # Save the gradient computed using different approaches for comparison
+        # log_path = "/data/ruihan/projects/PhysDreamer/projects/train/output/inverse_sim/mat_force_lr_0.001_lf_1e-5_initE_0.1_OneFrame_debug_grad_lambda_0.0_0.0_0.0_0.0_1.0_0.0_FD_0/seed0"
+        # np.save(os.path.join(log_path, f"C_grad_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), C_grad.detach().cpu().numpy())
+        # np.save(os.path.join(log_path, f"F_grad_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), F_grad.detach().cpu().numpy())
+        # np.save(os.path.join(log_path, f"velo_grad_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), velo_grad.detach().cpu().numpy())
+        # np.save(os.path.join(log_path, f"pos_grad_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), pos_grad.detach().cpu().numpy())
+        # np.save(os.path.join(log_path, f"out_C_grad_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), out_C_grad.detach().cpu().numpy())
+        # np.save(os.path.join(log_path, f"out_F_grad_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), out_F_grad.detach().cpu().numpy())
+        # np.save(os.path.join(log_path, f"out_velo_grad_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), out_velo_grad.detach().cpu().numpy())
+        # np.save(os.path.join(log_path, f"out_pos_grad_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), out_pos_grad.detach().cpu().numpy())
+        # per_particle_E_grad = mpm_model.E.grad.numpy()
+        # np.save(os.path.join(log_path, f"E_grad_before_aggregating_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), per_particle_E_grad)
         
 
         # grad for E, nu. TODO: add spatially varying E, nu later

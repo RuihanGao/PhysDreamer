@@ -119,19 +119,22 @@ class Trainer:
         logger.info(accelerator.state, main_process_only=False)
 
         set_seed(args.seed + accelerator.process_index)
+        print(f"check seed {args.seed} + {accelerator.process_index}")
 
         demo_cfg = DemoParams(args.scene_name).get_cfg(
             args.demo_name,
             args.model_id,
             args.eval_ys,
-            args.force_id,
-            args.force_mag,
-            args.velo_scaling,
-            args.point_id,
-            args.cam_id,
-            args.apply_force,
-            args.hide_force,
-            args.postfix,
+            force_id=args.force_id,
+            force_mag=args.force_mag,
+            force_duration=args.force_duration,
+            force_radius=args.force_radius,
+            velo_scaling=args.velo_scaling,
+            point_id=args.point_id,
+            cam_id=args.cam_id,
+            apply_force=args.apply_force,
+            hide_force=args.hide_force,
+            postfix=args.postfix,
         )
         self.args.dataset_dir = demo_cfg["dataset_dir"]
         self.demo_cfg = demo_cfg
@@ -171,7 +174,7 @@ class Trainer:
         self.accelerator = accelerator
 
         # init traiable params
-        E_nu_list = self.init_trainable_params()
+        E_nu_list = self.init_trainable_params(poisson_numpy=0.3)
         for p in E_nu_list:
             p.requires_grad = False
         self.E_nu_list = E_nu_list
@@ -192,6 +195,7 @@ class Trainer:
 
     def init_trainable_params(
         self,
+        poisson_numpy=None,
     ):
         # init young modulus and poisson ratio
         # from pre-optimized;  gres32 step 128.  300 epoch. lr 10.0  psnr: 27.72028086735652.  Stop at 100epoch
@@ -199,7 +203,8 @@ class Trainer:
         young_modulus = torch.tensor(young_numpy, dtype=torch.float32).to(
             self.accelerator.device
         )
-        poisson_numpy = np.random.uniform(0.1, 0.4)
+
+        poisson_numpy = np.random.uniform(0.1, 0.4) if poisson_numpy is None else poisson_numpy
         poisson_ratio = torch.tensor(poisson_numpy, dtype=torch.float32).to(
             self.accelerator.device
         )
@@ -295,24 +300,43 @@ class Trainer:
             # sim_xyzs = torch.from_numpy(sim_xyzs).float().to(device)
 
             sim_xyzs = downsample_with_kmeans_gpu(sim_xyzs, num_cluster)
-            print(f"after downsampling, before downsample_shift, check sim_xyzs range: {sim_xyzs.min()}, {sim_xyzs.max()}")
+            print(f"after downsampling, before downsample_shift, check sim_xyzs range: {sim_xyzs.min()}, {sim_xyzs.max()}, shape {sim_xyzs.shape}")
+            # after downsampling, before downsample_shift, check sim_xyzs range: 0.0, 0.6937066316604614, shape torch.Size([5288, 3])
+
+            # # save the downsampled points for visualization
+            # downsampled_points_path = os.path.join(dataset_dir, "downsampled_points_demo.npy")
+            # downsampled_points = sim_xyzs.clone().detach().cpu().numpy()
+            # np.save(downsampled_points_path, downsampled_points)
+            # print(f"Save downsampled points to {downsampled_points_path}")
+            # from pytorch3d.io import save_ply
+            # save_ply(downsampled_points_path.replace(".npy", ".ply"), verts=torch.from_numpy(downsampled_points))
+            # pdb.set_trace()
 
             # sim_xyzs = (sim_xyzs + self.downsample_shift) / scale
             # shift += self.downsample_shift
             # print(f"after downsampling, after downsample_shift, check sim_xyzs range: {sim_xyzs.min()}, {sim_xyzs.max()}")
+
+
+        else:
+            # without downsampling, use the filtered clean points as the simulation points
+            print(f"Use the filtered clean points as the simulation points")
+            sim_xyzs = self.clean_xyzs.clone()
+            sim_xyzs = (sim_xyzs + shift) / scale
+            print(f"check sim_xyzs range: {sim_xyzs.min()}, {sim_xyzs.max()}, shape {sim_xyzs.shape}")
+            # check sim_xyzs range: 0.14057305455207825, 0.6914111971855164, shape torch.Size([5337, 3])
+
             
+        sim_gaussian_pos = self.render_params.gaussians.get_xyz.detach().clone()[
+            self.sim_mask_in_raw_gaussian, :
+        ]
+        sim_gaussian_pos = (sim_gaussian_pos + shift) / scale
 
-            sim_gaussian_pos = self.render_params.gaussians.get_xyz.detach().clone()[
-                self.sim_mask_in_raw_gaussian, :
-            ]
-            sim_gaussian_pos = (sim_gaussian_pos + shift) / scale
+        # record top k index for each point, to interpolate positions and rotations later
+        cdist = torch.cdist(sim_gaussian_pos, sim_xyzs) * -1.0
+        _, top_k_index = torch.topk(cdist, self.args.top_k, dim=-1)
+        self.top_k_index = top_k_index
 
-            # record top k index for each point, to interpolate positions and rotations later
-            cdist = torch.cdist(sim_gaussian_pos, sim_xyzs) * -1.0
-            _, top_k_index = torch.topk(cdist, self.args.top_k, dim=-1)
-            self.top_k_index = top_k_index
-
-            print("Downsampled to: ", sim_xyzs.shape[0], "by", downsample_scale)
+        print("Downsampled to: ", sim_xyzs.shape[0], "by", downsample_scale)         
 
         self.scale, self.shift = scale, shift
         # Compute the volume of each particle
@@ -597,7 +621,9 @@ class Trainer:
         #    we will track foreground points with mask: self.sim_mask_in_raw_gaussian
         gaussian_dir = os.path.dirname(gaussian_path)
 
-        clean_points_path = os.path.join(gaussian_dir, "clean_object_points.ply")
+        # clean_points_path = os.path.join(gaussian_dir, "clean_object_points.ply")
+        # 2025-02-23: change the clean points to a downsampled ply and filtered out the points that are too far away due to downsampling process
+        clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered.ply")
 
         assert os.path.exists(
             clean_points_path
@@ -682,6 +708,7 @@ class Trainer:
 
         print(f"check pretrained material and velocity fields")
         print(f"check youngs_modulus: {youngs_modulus.shape} range {youngs_modulus.min()}, {youngs_modulus.max()}") # shape [13356, ], range 1417130.5, 105582136.0
+        print(f"check poissons: {poisson.shape} range {poisson.min()}, {poisson.max()}") # shape [13356], range 0.2646, 0.2646
         print(f"check init_velocity: {init_velocity.shape} range {init_velocity.min()}, {init_velocity.max()}") # shape [13356, 3], range -0.02443808503448963, 0.023882806301116943
         print(f"vx range: {init_velocity[:, 0].min()}, {init_velocity[:, 0].max()}, vy range: {init_velocity[:, 1].min()}, {init_velocity[:, 1].max()}, vz range: {init_velocity[:, 2].min()}, {init_velocity[:, 2].max()}") 
         # vx range: -0.24438084661960602, -0.1958092898130417, vy range: 0.19218483567237854, 0.23882806301116943, vz range: -0.15181176364421844, -0.12185412645339966
@@ -826,26 +853,11 @@ class Trainer:
                 # undo scaling and shifting
                 pos = (pos * self.scale) - self.shift
                 render_pos_list.append(pos)
-            
-            # # Debugging logs
-            # particle_v_list_ = np.stack(particle_v_list, axis=0)
-            # particle_v_output_path = pos_path.replace("_pos.npy", "_particle_v.npy")
-            # np.save(particle_v_output_path, particle_v_list_)
-            # print(f"Save particle_v to {particle_v_output_path}")
 
-            # grid_v_in_list_ = np.stack(grid_v_in_list, axis=0)
-            # grid_v_in_output_path = pos_path.replace("_pos.npy", "_grid_v_in.npy")
-            # np.save(grid_v_in_output_path, grid_v_in_list_)
-            # # pdb.set_trace()
-
-            # grid_v_out_list_ = np.concatenate(grid_v_out_list, axis=0)
-            # grid_v_out_output_path = pos_path.replace("_pos.npy", "_grid_v_out.npy")
-            # np.save(grid_v_out_output_path, grid_v_out_list_)
-            # # pdb.set_trace()
-
-            # # save the sequence of drive points
-            # numpy_pos = torch.stack(render_pos_list, dim=0).detach().cpu().numpy()
-            # np.save(pos_path, numpy_pos)
+            # save the sequence of drive points
+            numpy_pos = torch.stack(render_pos_list, dim=0).detach().cpu().numpy()
+            print(f"save pos to {pos_path}, check shape {numpy_pos.shape}")
+            np.save(pos_path, numpy_pos)
         else:
             render_pos_list = []
             for i in range(pos_array.shape[0]):
@@ -1057,6 +1069,8 @@ def parse_args():
     parser.add_argument("--eval_ys", type=float, default=1.0)
     parser.add_argument("--force_id", type=int, default=1)
     parser.add_argument("--force_mag", type=float, default=1.0)
+    parser.add_argument("--force_radius", type=float, default=0.1)
+    parser.add_argument("--force_duration", type=float, default=0.75)
     parser.add_argument("--velo_scaling", type=float, default=5.0)
     parser.add_argument("--point_id", type=int, default=0)
     parser.add_argument("--apply_force", action="store_true", default=False)
@@ -1085,3 +1099,5 @@ if __name__ == "__main__":
         apply_force=args.apply_force,
         save_name=args.demo_name,
     )
+
+

@@ -13,7 +13,7 @@ from physdreamer.gaussian_3d.gaussian_renderer.render import (
 )
 from physdreamer.gaussian_3d.gaussian_renderer.flow_depth_render import (
     render_flow_depth_w_gaussian,
-)
+) 
 import cv2
 import numpy as np
 from sklearn.cluster import KMeans
@@ -701,7 +701,7 @@ def add_constant_force(
     apply_force_mask = dist < radius
     apply_force_mask = apply_force_mask.type(torch.int)
 
-    print(apply_force_mask.shape, apply_force_mask.sum().item(), "apply force mask")
+    print(apply_force_mask.shape, apply_force_mask.sum().item(), "apply force mask") # torch.Size([5342]) 2780 apply force mask
 
     if impulse_mode == "particle":
         mpm_sovler.add_impulse_on_particles_with_mask(
@@ -964,17 +964,17 @@ def downsample_with_kmeans(points_array: np.ndarray, num_points: int):
 
 
 @torch.no_grad()
-def downsample_with_kmeans_gpu(points_array: torch.Tensor, num_points: int):
+def downsample_with_kmeans_gpu(points_array: torch.Tensor, num_points: int, max_iter: int = 100, max_neighbors: int=15, distance: str="euclidean"):
 
     from kmeans_gpu import KMeans
 
     kmeans = KMeans(
         n_clusters=num_points,
-        max_iter=100,
+        max_iter=max_iter,
         tolerance=1e-4,
-        distance="euclidean",
+        distance=distance, # `euclidean` or `cosine`.
         sub_sampling=None,
-        max_neighbors=15,
+        max_neighbors=max_neighbors,
     )
 
     features = torch.ones(1, 1, points_array.shape[0], device=points_array.device)
@@ -982,7 +982,7 @@ def downsample_with_kmeans_gpu(points_array: torch.Tensor, num_points: int):
     # Forward
 
     print(
-        "=> staring downsample with kmeans from ",
+        "=> starting downsample with kmeans from ",
         points_array.shape[1],
         " points to ",
         num_points,
