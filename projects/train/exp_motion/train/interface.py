@@ -699,16 +699,16 @@ class MPMDifferentiableSimulationClean(autograd.Function):
 
         # pdb.set_trace()
 
-        ### Trial Experiment Starts
-        postfix = "direct_backward"
-        # 2025-02-26 Implement direct backward through warp
-        ctx.prev_state.particle_x.grad = from_torch_safe(out_pos_grad, dtype=wp.vec3, requires_grad=True)
-        ctx.prev_state.particle_v.grad = from_torch_safe(out_velo_grad, dtype=wp.vec3, requires_grad=True)
-        ctx.prev_state.particle_F_trial.grad = from_torch_safe(out_F_grad, dtype=wp.mat33, requires_grad=True)
-        ctx.prev_state.particle_C.grad = from_torch_safe(out_C_grad, dtype=wp.mat33, requires_grad=True)
-        # ctx.prev_state.particle_cov.grad = from_torch_safe(out_cov_grad, dtype=wp.vec6, requires_grad=True) # gradient dossn't match
-        ctx.tape.backward()
-        ### Trial Experiment Ends
+        # # ### Trial Experiment Starts
+        # # postfix = "direct_backward"
+        # # # 2025-02-26 Implement direct backward through warp
+        # ctx.prev_state.particle_x.grad = from_torch_safe(out_pos_grad, dtype=wp.vec3, requires_grad=True)
+        # ctx.prev_state.particle_v.grad = from_torch_safe(out_velo_grad, dtype=wp.vec3, requires_grad=True)
+        # ctx.prev_state.particle_F_trial.grad = from_torch_safe(out_F_grad, dtype=wp.mat33, requires_grad=True)
+        # ctx.prev_state.particle_C.grad = from_torch_safe(out_C_grad, dtype=wp.mat33, requires_grad=True)
+        # # ctx.prev_state.particle_cov.grad = from_torch_safe(out_cov_grad, dtype=wp.vec6, requires_grad=True) # gradient dossn't match
+        # ctx.tape.backward() 
+        # # ### Trial Experiment Ends
 
 
         num_particles = ctx.num_particles
@@ -721,8 +721,6 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         next_state = next_state_list[-1]
 
         query_mask = ctx.saved_tensors
-
-
         postfix = "_org"
         with wp.ScopedDevice(device):
             
@@ -769,7 +767,11 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         # np.save(os.path.join(log_path, f"out_F_grad_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), out_F_grad.detach().cpu().numpy())
         # np.save(os.path.join(log_path, f"out_velo_grad_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), out_velo_grad.detach().cpu().numpy())
         # np.save(os.path.join(log_path, f"out_pos_grad_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), out_pos_grad.detach().cpu().numpy())
+
         # per_particle_E_grad = mpm_model.E.grad.numpy()
+        # print(f"check per_particle_E_grad range for step {ctx.step}, start_time_idx {ctx.start_time_idx}: min {per_particle_E_grad.min()}, max {per_particle_E_grad.max()}")
+        # pdb.set_trace()
+        # log_path = "/data/ruihan/projects/PhysDreamer/projects/train/output/inverse_sim/mat_velo_lr_0.001_lv_initE_0.1_OneFrame_homo_check_grad_lambda_0.0_0.0_0.0_0.0_1.0_0.0_FD_0/seed0"
         # np.save(os.path.join(log_path, f"E_grad_before_aggregating_{ctx.step}_{ctx.start_time_idx}{postfix}.npy"), per_particle_E_grad)
         
 

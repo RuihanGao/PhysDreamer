@@ -185,6 +185,7 @@ class Trainer:
         if args.checkpoint_path == "None":
             args.checkpoint_path = None
         if args.checkpoint_path is not None:
+            print("=> loading checkpoint from: ", args.checkpoint_path)
             self.load(args.checkpoint_path)
         self.sim_fields, self.velo_fields = accelerator.prepare(
             self.sim_fields, self.velo_fields
@@ -778,6 +779,7 @@ class Trainer:
             # apply force to points within the radius of the center point
             force_radius = self.demo_cfg["force_radius"]
 
+            print(f"In demo, add constant force for {force_duration} sec, delta_time {delta_time}, force_radius {force_radius}, force {force}")
             self.add_constant_force(
                 center_point, force_radius, force, delta_time, 0.0, force_duration, self.impulse_mode
             )

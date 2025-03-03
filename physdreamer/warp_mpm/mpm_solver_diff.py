@@ -289,6 +289,7 @@ class MPMWARPDiff(object):
 
         
         for k in range(len(self.p2g_extra_operations)):
+            # print(f"In p2g2p_differentiable, run p2g_extra_operations {k}, self.time {self.time}, dt {dt}") # run p2g_extra_operations 0, self.time 0.0, dt 4.340277777777778e-05
             # run p2g_apply_impulse to transfer particle impulse onto the grid when impulse force is applied
             wp.launch(
                 kernel=self.p2g_extra_operations[k],
@@ -296,6 +297,7 @@ class MPMWARPDiff(object):
                 inputs=[self.time, dt, mpm_state, mpm_model, self.impulse_params[k]],
                 device=device,
             )
+            # pdb.set_trace()
 
         # print(f"after p2g_extra_operations, grid_v_in: {np.isnan(mpm_state.grid_v_in.numpy()).any()}, max {mpm_state.grid_v_in.numpy().max()}")
         if debugging:
@@ -803,6 +805,7 @@ class MPMWARPDiff(object):
                         param.force[2] / state.particle_mass[p],
                     )
                     state.particle_v[p] = state.particle_v[p] + impulse * dt
+                    # wp.atomicAdd(state.particle_v[p], impulse * dt) # 
 
         self.pre_p2g_operations.append(apply_force)
 

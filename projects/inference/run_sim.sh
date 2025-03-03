@@ -38,23 +38,59 @@
 
 # CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-5 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0
 
-# 2025-02-25 Generate referece video with IMPULSE force, where force is only applied before the first frame (fps=30)
-CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-5 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
-CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-5 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
-CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-5 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# # 2025-02-25 Generate referece video with IMPULSE force, where force is only applied before the first frame (fps=30)
+# CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-5 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-5 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-5 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
 
 
-CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
-CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
-CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
 
 
-CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-3 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
-CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-3 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
-CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-3 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-3 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-3 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-3 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
 
 
-CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-2 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
-CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-2 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
-CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-2 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-2 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-2 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-2 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --hide_force --velo_scaling 1.0 --force_duration 0.03 &
 
+
+
+
+# # 2025-02-26 Generate a reference video with pretrained velocity field + uniform material + clean downsampled point cloud
+# CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid_lv --hide_force --velo_scaling 1.0
+
+
+
+# Generate a reference video with "instantaneous" force
+# CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 0.03 &
+# CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 0.03 &
+
+
+
+# CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-6 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-4 &
+# CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-6 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-4 &
+# CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-6 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-4
+
+# CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-6 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5 &
+# CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-6 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5 &
+# CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-6 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5
+
+# CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-5 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5 &
+# CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-5 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5 &
+# CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-5 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5
+
+# CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5 &
+# CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5 &
+# CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 1e-4 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5
+
+
+
+# CUDA_VISIBLE_DEVICES=0 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 0.1 --cam_id 0 --eval_ys 1000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5 &
+CUDA_VISIBLE_DEVICES=1 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 0.1 --cam_id 0 --eval_ys 5000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5 &
+CUDA_VISIBLE_DEVICES=3 python3 demo.py --scene_name carnation --apply_force --force_id 0  --point_id 0 --force_mag 0.1 --cam_id 0 --eval_ys 8000000 --static_camera --downsample_scale 1.0 --impulse_mode grid --postfix _grid --velo_scaling 1.0 --force_duration 4.3e-5 

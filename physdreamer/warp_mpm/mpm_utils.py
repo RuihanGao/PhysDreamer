@@ -437,45 +437,47 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: float
 def p2g_apply_impulse(time: float, dt: float, state: MPMStateStruct, model: MPMModelStruct, param: Impulse_modifier):
 
     p = wp.tid()
-    if state.particle_selection[p] == 0 and param.mask[p] >= 1:
-        grid_pos = state.particle_x[p] * model.inv_dx
-        base_pos_x = wp.int(grid_pos[0] - 0.5)
-        base_pos_y = wp.int(grid_pos[1] - 0.5)
-        base_pos_z = wp.int(grid_pos[2] - 0.5)
+    if time >= param.start_time and time < param.end_time:
+        # print(time)
+        if state.particle_selection[p] == 0 and param.mask[p] >= 1:
+            grid_pos = state.particle_x[p] * model.inv_dx
+            base_pos_x = wp.int(grid_pos[0] - 0.5)
+            base_pos_y = wp.int(grid_pos[1] - 0.5)
+            base_pos_z = wp.int(grid_pos[2] - 0.5)
 
-        fx = grid_pos - wp.vec3(
-            wp.float(base_pos_x), wp.float(base_pos_y), wp.float(base_pos_z)
-        )
-        wa = wp.vec3(1.5) - fx
-        wb = fx - wp.vec3(1.0)
-        wc = fx - wp.vec3(0.5)
-        w = wp.mat33(
-            wp.cw_mul(wa, wa) * 0.5,
-            wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
-            wp.cw_mul(wc, wc) * 0.5,
-        )
+            fx = grid_pos - wp.vec3(
+                wp.float(base_pos_x), wp.float(base_pos_y), wp.float(base_pos_z)
+            )
+            wa = wp.vec3(1.5) - fx
+            wb = fx - wp.vec3(1.0)
+            wc = fx - wp.vec3(0.5)
+            w = wp.mat33(
+                wp.cw_mul(wa, wa) * 0.5,
+                wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
+                wp.cw_mul(wc, wc) * 0.5,
+            )
 
-        # particle impulse
-        impulse = wp.vec3(
-            param.force[0],
-            param.force[1],
-            param.force[2],
-        ) # actually force, so we multiply by dt later to get impulse
+            # particle impulse
+            impulse = wp.vec3(
+                param.force[0],
+                param.force[1],
+                param.force[2],
+            ) # actually force, so we multiply by dt later to get impulse
 
-        for i in range(0, 3):
-            for j in range(0, 3):
-                for k in range(0, 3):
-                    ix = base_pos_x + i
-                    iy = base_pos_y + j
-                    iz = base_pos_z + k
-                    weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
-                    # if weight < 0.0:
-                    #     print(weight)
+            for i in range(0, 3):
+                for j in range(0, 3):
+                    for k in range(0, 3):
+                        ix = base_pos_x + i
+                        iy = base_pos_y + j
+                        iz = base_pos_z + k
+                        weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
+                        # if weight < 0.0:
+                        #     print(weight)
 
-                    v_in_add = weight * impulse * dt
-                    
-                    wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
-                    
+                        v_in_add = weight * impulse * dt
+                        
+                        wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
+                        
 
 # add gravity
 @wp.kernel

@@ -233,6 +233,7 @@ class MPMStateStruct(object):
             inputs=[self.particle_F_trial],
             device=device,
         )
+        
         wp.launch(
             kernel=set_mat33_to_identity,
             dim=n_particles,

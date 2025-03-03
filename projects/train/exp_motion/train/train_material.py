@@ -267,8 +267,11 @@ class Trainer:
         E_nu_list = self.init_trainable_params(poisson_numpy=0.3)
 
         self.E_nu_list = E_nu_list
-        self.FD_disturb_E = args.FD_disturb_E
-        self.E_nu_list[0] += self.FD_disturb_E
+        self.FD_perturb_E = args.FD_perturb_E
+        self.E_nu_list[0] += self.FD_perturb_E
+        self.save_FD_loss = args.save_FD_loss
+        self.save_FD_grad = args.save_FD_grad
+        self.total_substeps = args.total_substeps
 
         if self.homo_material:
             # change to train E only
@@ -280,8 +283,10 @@ class Trainer:
                 p.requires_grad = True
 
 
-        print(f"FD_disturb_E: {args.FD_disturb_E} check E_nu_list: {E_nu_list}") # tensor([5000000.], device='cuda:0', requires_grad=True), tensor(0.3146, device='cuda:0', requires_grad=True)]
+        print(f"FD_perturb_E: {args.FD_perturb_E} check E_nu_list: {E_nu_list}") # tensor([5000000.], device='cuda:0', requires_grad=True), tensor(0.3146, device='cuda:0', requires_grad=True)]
         # pdb.set_trace()  
+
+        self.extra_no_grad_steps = args.extra_no_grad_steps
 
         self.model = accelerator.prepare(self.model)
         self.setup_simulation(dataset_dir, grid_size=args.grid_size)
@@ -747,7 +752,8 @@ class Trainer:
         # Get material params
         density, youngs_modulus, ret_poisson, entropy = self.get_material_params(device)
         
-        print(f"check youngs_modulus in get_simulation_input: {youngs_modulus.shape}, range {youngs_modulus.min().item()} - {youngs_modulus.max().item()}")  # pretrained material: range 1442228.0 - 105213600.0
+        # print(f"check youngs_modulus in get_simulation_input: {youngs_modulus.shape}, range {youngs_modulus.min().item()} - {youngs_modulus.max().item()}")  # pretrained material: range 1442228.0 - 105213600.0
+        # print(f"apply_force? {self.apply_force}") # pretrained material: range 0.3 - 0.3
 
         initial_position_time0 = self.particle_init_position.clone()
 
@@ -881,6 +887,13 @@ class Trainer:
 
         gt_pos = data["gt_pos"][0, 1:, ...] # torch.Size([1, 91, 5342, 3]) -> [90, 5342, 3]
         print(f"check loading gt pos in train_one_step: {gt_pos.shape}") # torch.Size([1, 91, 5342, 3])
+        gt_pos_substep = data["gt_pos_substep"]
+        if gt_pos_substep is not None:
+            gt_pos_substep = gt_pos_substep[0, 1:, ...]
+            print(f"check gt_pos_substep in train_one_step: {gt_pos_substep.shape}")
+        else:
+            gt_pos_substep = None
+        
 
         # window_size = int(self.window_size_schduler.compute_state(self.step)[0]) # number of frames to run simulation in this training iteration
         # 2025-02-25 For debugging purpose, fix the window_size to 1
@@ -919,6 +932,8 @@ class Trainer:
             requires_grad=True,
         )
         self.mpm_state.set_require_grad(True)
+        # print(f"In train_one_step, check mpm_state require_grad")
+        # print(f"before get_simulation_input: {self.mpm_state.particle_x.requires_grad} {self.mpm_state.particle_v.requires_grad}") # True True
 
         (
             density,
@@ -930,6 +945,7 @@ class Trainer:
             particle_C,
             entropy,
         ) = self.get_simulation_input(device)
+        # print(f"after get_simulation_input: {self.mpm_state.particle_x.requires_grad} {self.mpm_state.particle_v.requires_grad}") # True True
 
 
         init_velo_mean = particle_velo[query_mask, :].mean().item()
@@ -964,13 +980,24 @@ class Trainer:
 
         for start_time_idx in range(0, window_size, temporal_stride):
 
-            end_time_idx = min(start_time_idx + temporal_stride, window_size)
-            print(f"start_time_idx {start_time_idx}, end_time_idx {end_time_idx}, window_size {window_size}, temporal_stride {temporal_stride}")
-            # end_time_idx-start_time_idx => frame per stage
-            num_step_with_grad = num_substeps * (end_time_idx - start_time_idx) # ~= num_substeps per stage
 
-            gt_frame = gt_videos[[end_time_idx - 1]]
-            gt_pos_frame = gt_pos[end_time_idx - 1]
+            # 2025-02-28 Enfore a few substesps
+            if self.total_substeps > 0:
+                total_substeps = self.total_substeps
+                use_substep_gt = True
+                gt_pos_frame = gt_pos_substep[self.total_substeps - 1] # only check the gradient once before accumulating. e.g. run 4 substep, then check gradient right after the 4 substeps
+                # TODO: continue modification here. Load the corresponding gt_pos_substep_frame and check the gradient for finite difference and your implementation
+            else:
+                end_time_idx = min(start_time_idx + temporal_stride, window_size)
+                print(f"start_time_idx {start_time_idx}, end_time_idx {end_time_idx}, window_size {window_size}, temporal_stride {temporal_stride}")
+                total_substeps = num_substeps * (end_time_idx - start_time_idx) # end_time_idx-start_time_idx => frame per stage
+                use_substep_gt = False
+                gt_frame = gt_videos[[end_time_idx - 1]]
+                gt_pos_frame = gt_pos[end_time_idx - 1]
+            
+            num_step_with_grad = total_substeps - self.extra_no_grad_steps # ~= num_substeps per stage
+
+
             # print(f"check the total number of frames in gt_videos: {gt_videos.shape}, gt_pos {gt_pos.shape}, gt_frame {gt_frame.shape}, gt_pos_frame {gt_pos_frame.shape}") # [13, 3, 576, 1024], [90, 5337, 3], [1, 3, 576, 1024], [5337, 3]
             # pdb.set_trace()
 
@@ -979,41 +1006,225 @@ class Trainer:
                     device
                 ) # otherwise got error "Trying to backward through the graph a second time"
 
-            if checkpoint_steps > 0 and checkpoint_steps < num_step_with_grad:
-                for time_step in range(0, num_step_with_grad, checkpoint_steps):
-                    num_step = min(num_step_with_grad - time_step, checkpoint_steps)
-                    if num_step == 0:
-                        break
-                    if self.homo_material:
-                        particle_pos, particle_velo, particle_F, particle_C = (
-                            MPMDifferentiableSimulationWCheckpoint.apply(
-                                self.mpm_solver,
-                                self.mpm_state,
-                                self.mpm_model,
-                                substep_size,
-                                num_step,
-                                particle_pos,
-                                particle_velo,
-                                particle_F,
-                                particle_C,
-                                self.E_nu_list[0]*1e7,
-                                self.E_nu_list[1],
-                                density,
-                                query_mask,
-                                device,
-                                True,
-                                0,
-                            )
-                        )
 
+            if self.save_FD_grad:
+                # roll out two forward simulations, one without perturbation and one with purturbation
+                # compute the gradient of the loss w.r.t. to the material parameters
+                if checkpoint_steps > 0 and checkpoint_steps < num_step_with_grad:
+                    raise NotImplementedError(f"Finite difference gradient is not supported with checkpointing  for MPMDifferentiableSimulationWCheckpoint")
+                assert self.homo_material, "Finite difference gradient is only supported for homogeneous material"
+                # roll out two forward simulations
+                perturb_E = 1e-5
+                particle_pos, particle_velo, particle_F, particle_C, particle_cov = (
+                        MPMDifferentiableSimulationClean.apply(
+                            self.mpm_solver,
+                            self.mpm_state,
+                            self.mpm_model,
+                            substep_size,
+                            num_step_with_grad,
+                            particle_pos,
+                            particle_velo,
+                            particle_F,
+                            particle_C,
+                            self.E_nu_list[0]*1e7,
+                            self.E_nu_list[1],
+                            density,
+                            query_mask,
+                            device,
+                            True,
+                            self.extra_no_grad_steps,
+                            start_time_idx,
+                            self.step,
+                        )
+                    )
+                # substep-3: render gaussian
+                gaussian_pos = particle_pos * self.scale - self.shift
+                undeformed_gaussian_pos = (
+                    self.particle_init_position * self.scale - self.shift
+                )
+                disp_offset = gaussian_pos - undeformed_gaussian_pos.detach()
+                # gaussian_pos.requires_grad = True
+
+                simulated_video = render_gaussian_seq_w_mask_with_disp(
+                    cam,
+                    self.render_params,
+                    undeformed_gaussian_pos.detach(),
+                    self.top_k_index,
+                    [disp_offset],
+                    self.sim_mask_in_raw_gaussian,
+                )
+
+                rendered_video_list.append(simulated_video.detach())
+
+                loss_wo_perturbation = 0.0
+                if self.lambda_pos_l2 > 0:
+                    # TODO: 2025-02-25: verify the gradient computation with finite difference
+                    pos_L2_loss_wo_perturbation = F.mse_loss(gaussian_pos, gt_pos_frame, reduction="none")
+                    print(f"compute the pos_L2_loss, pos_L2_loss shape {pos_L2_loss.shape}, mean {pos_L2_loss.mean().item()}")
+                    pos_L2_loss = pos_L2_loss_wo_perturbation.mean()
+                    
+                    if self.step > 3:
+                        pdb.set_trace()
+                        
+                    loss_wo_perturbation += self.lambda_pos_l2 * pos_L2_loss
+                else:
+                    raise NotImplementedError("Finite difference gradient is only supported for pos L2 loss. Add code for other losses.")
+                
+                raise NotImplementedError(f"Finish the implementation for Finite difference here")
+                # TODO: reset the mpm_model and mpm_state to initial state
+                particle_pos, particle_velo, particle_F, particle_C, particle_cov = (
+                        MPMDifferentiableSimulationClean.apply(
+                            self.mpm_solver,
+                            self.mpm_state,
+                            self.mpm_model,
+                            substep_size,
+                            num_step_with_grad,
+                            particle_pos,
+                            particle_velo,
+                            particle_F,
+                            particle_C,
+                            (self.E_nu_list[0]+perturb_E)*1e7,
+                            self.E_nu_list[1],
+                            density,
+                            query_mask,
+                            device,
+                            True,
+                            self.extra_no_grad_steps,
+                            start_time_idx,
+                            self.step,
+                        )
+                    )
+
+                # substep-3: render gaussian
+                gaussian_pos = particle_pos * self.scale - self.shift
+                undeformed_gaussian_pos = (
+                    self.particle_init_position * self.scale - self.shift
+                )
+                disp_offset = gaussian_pos - undeformed_gaussian_pos.detach()
+                # gaussian_pos.requires_grad = True
+
+                simulated_video = render_gaussian_seq_w_mask_with_disp(
+                    cam,
+                    self.render_params,
+                    undeformed_gaussian_pos.detach(),
+                    self.top_k_index,
+                    [disp_offset],
+                    self.sim_mask_in_raw_gaussian,
+                )
+
+                rendered_video_list.append(simulated_video.detach())
+
+                loss_w_perturbation = 0.0
+                if self.lambda_pos_l2 > 0:
+                    # TODO: 2025-02-25: verify the gradient computation with finite difference
+                    pos_L2_loss_w_perturbation = F.mse_loss(gaussian_pos, gt_pos_frame, reduction="none")
+                    print(f"compute the pos_L2_loss, pos_L2_loss shape {pos_L2_loss.shape}, mean {pos_L2_loss.mean().item()}")
+                    pos_L2_loss = pos_L2_loss_wo_perturbation.mean()
+                    
+                    if self.step > 3:
+                        pdb.set_trace()
+                        
+                    loss_w_perturbation += self.lambda_pos_l2 * pos_L2_loss
+                else:
+                    raise NotImplementedError("Finite difference gradient is only supported for pos L2 loss. Add code for other losses.")
+
+                E_grad_FD = (loss_w_perturbation - loss_wo_perturbation) / perturb_E 
+                E_grad_FD = E_grad_FD.mean(axis=1) # shape [N,]
+
+                print(f"compute E_grad_FD, E_grad_FD shape {E_grad_FD.shape}, mean {E_grad_FD.mean().item()}, std {E_grad_FD.std().item()}")    
+                if self.step > 3: 
+                    pdb.set_trace()
+                else:
+                    # save the gradient to numpy array
+                    E_grad_FD_np = E_grad_FD.detach().cpu().numpy()
+                    E_grad_FD_np = E_grad_FD_np.reshape(-1, 1)
+                    E_grad_FD_np_path = os.path.join(self.wandb_folder, f"E_grad_FD_{self.step:06d}_{start_time_idx:02d}.npy")
+                    np.save(E_grad_FD_np_path, E_grad_FD_np)
+
+
+            else:
+                # original implementation. Run differentiable simulation, compute loss, and backward to get gradients for E
+                if checkpoint_steps > 0 and checkpoint_steps < num_step_with_grad:
+                    for time_step in range(0, num_step_with_grad, checkpoint_steps):
+                        num_step = min(num_step_with_grad - time_step, checkpoint_steps)
+                        if num_step == 0:
+                            break
+                        if self.homo_material:
+                            particle_pos, particle_velo, particle_F, particle_C = (
+                                MPMDifferentiableSimulationWCheckpoint.apply(
+                                    self.mpm_solver,
+                                    self.mpm_state,
+                                    self.mpm_model,
+                                    substep_size,
+                                    num_step,
+                                    particle_pos,
+                                    particle_velo,
+                                    particle_F,
+                                    particle_C,
+                                    self.E_nu_list[0]*1e7,
+                                    self.E_nu_list[1],
+                                    density,
+                                    query_mask,
+                                    device,
+                                    True,
+                                    0,
+                                )
+                            )
+
+                        else:
+                            particle_pos, particle_velo, particle_F, particle_C = (
+                                MPMDifferentiableSimulationWCheckpoint.apply(
+                                    self.mpm_solver,
+                                    self.mpm_state,
+                                    self.mpm_model,
+                                    substep_size,
+                                    num_step,
+                                    particle_pos,
+                                    particle_velo,
+                                    particle_F,
+                                    particle_C,
+                                    youngs_modulus,
+                                    self.E_nu_list[1],
+                                    density,
+                                    query_mask,
+                                    device,
+                                    True,
+                                    0,
+                                )
+                            )
+
+                else:
+                    if self.homo_material:
+                        particle_pos, particle_velo, particle_F, particle_C, particle_cov = (
+                        MPMDifferentiableSimulationClean.apply(
+                            self.mpm_solver,
+                            self.mpm_state,
+                            self.mpm_model,
+                            substep_size,
+                            num_step_with_grad,
+                            particle_pos,
+                            particle_velo,
+                            particle_F,
+                            particle_C,
+                            self.E_nu_list[0]*1e7,
+                            self.E_nu_list[1],
+                            density,
+                            query_mask,
+                            device,
+                            True,
+                            self.extra_no_grad_steps,
+                            start_time_idx,
+                            self.step,
+                        )
+                    )
                     else:
-                        particle_pos, particle_velo, particle_F, particle_C = (
-                            MPMDifferentiableSimulationWCheckpoint.apply(
+                        particle_pos, particle_velo, particle_F, particle_C, particle_cov = (
+                            MPMDifferentiableSimulationClean.apply(
                                 self.mpm_solver,
                                 self.mpm_state,
                                 self.mpm_model,
                                 substep_size,
-                                num_step,
+                                num_step_with_grad,
                                 particle_pos,
                                 particle_velo,
                                 particle_F,
@@ -1025,197 +1236,154 @@ class Trainer:
                                 device,
                                 True,
                                 0,
+                                start_time_idx,
+                                self.step,
                             )
                         )
 
-            else:
-                if self.homo_material:
-                    particle_pos, particle_velo, particle_F, particle_C, particle_cov = (
-                    MPMDifferentiableSimulationClean.apply(
-                        self.mpm_solver,
-                        self.mpm_state,
-                        self.mpm_model,
-                        substep_size,
-                        num_step_with_grad,
-                        particle_pos,
-                        particle_velo,
-                        particle_F,
-                        particle_C,
-                        self.E_nu_list[0]*1e7,
-                        self.E_nu_list[1],
-                        density,
-                        query_mask,
-                        device,
-                        True,
-                        0,
-                        start_time_idx,
-                        self.step,
-                    )
+                # substep-3: render gaussian
+                gaussian_pos = particle_pos * self.scale - self.shift
+                undeformed_gaussian_pos = (
+                    self.particle_init_position * self.scale - self.shift
                 )
+                disp_offset = gaussian_pos - undeformed_gaussian_pos.detach()
+                # gaussian_pos.requires_grad = True
+
+                simulated_video = render_gaussian_seq_w_mask_with_disp(
+                    cam,
+                    self.render_params,
+                    undeformed_gaussian_pos.detach(),
+                    self.top_k_index,
+                    [disp_offset],
+                    self.sim_mask_in_raw_gaussian,
+                )
+
+                # if self.apply_force:
+                #     simulate_video_w_force = render_gaussian_seq_w_mask_cam_seq_with_force_with_disp(
+                #         [cam],
+                #         self.render_params,
+                #         undeformed_gaussian_pos.detach(),
+                #         self.top_k_index,
+                #         [disp_offset],
+                #         self.sim_mask_in_raw_gaussian,
+                #         closest_idx,
+                #         render_force,
+                #         force_duration_steps,
+                #         hide_force=False
+                #     )
+
+                # print("debug", simulated_video.shape, gt_frame.shape, gaussian_pos.shape, init_xyzs.shape, density.shape, query_mask.sum().item())
+                rendered_video_list.append(simulated_video.detach())
+                # if self.apply_force:
+                #     rendered_video_w_force_list.append(simulate_video_w_force)
+
+                # Compute loss
+                loss = 0.0
+                # l2_loss = 0.5 * F.mse_loss(simulated_video, gt_frame, reduction="mean")
+                # loss = l2_loss * (1.0 - self.ssim) + (1.0 - ssim_loss) * self.ssim
+                if self.lambda_img_l2 > 0:
+                    l2_loss = F.mse_loss(simulated_video, gt_frame, reduction="mean")
+                    loss += self.lambda_img_l2 * l2_loss
+
+                    if self.step < 1:
+                        # save each frame as image for visualization
+                        # print(f"check shape simulated_video {simulated_video.shape}, gt_frame {gt_frame.shape}") # [1, 3, 576, 1024], [1, 3, 576, 1024]
+                        # print(f"check range simulated_video {simulated_video.min().item()} - {simulated_video.max().item()}, gt_frame {gt_frame.min().item()} - {gt_frame.max().item()}") # simulated_video 0.019882982596755028 - 0.9924777150154114, gt_frame 0.0 - 1.0
+                        simulated_video_path = os.path.join(self.output_path, f"simulated_frame_{self.step:06d}_{start_time_idx:02d}.png")
+                        gt_frame_path = os.path.join(self.output_path, f"gt_frame_{self.step:06d}_{start_time_idx:02d}.png")
+                        simulated_video_img = simulated_video[0].detach().cpu().numpy().transpose(1, 2, 0)
+                        gt_frame_img = gt_frame[0].detach().cpu().numpy().transpose(1, 2, 0)
+                        simulated_video_img = Image.fromarray((simulated_video_img * 255).astype(np.uint8))
+                        gt_frame_img = Image.fromarray((gt_frame_img * 255).astype(np.uint8))
+                        simulated_video_img.save(simulated_video_path)
+                        gt_frame_img.save(gt_frame_path)       
                 else:
-                    particle_pos, particle_velo, particle_F, particle_C, particle_cov = (
-                        MPMDifferentiableSimulationClean.apply(
-                            self.mpm_solver,
-                            self.mpm_state,
-                            self.mpm_model,
-                            substep_size,
-                            num_step_with_grad,
-                            particle_pos,
-                            particle_velo,
-                            particle_F,
-                            particle_C,
-                            youngs_modulus,
-                            self.E_nu_list[1],
-                            density,
-                            query_mask,
-                            device,
-                            True,
-                            0,
-                            start_time_idx,
-                            self.step,
-                        )
-                    )
+                    l2_loss = torch.tensor(0.0)
 
-            # substep-3: render gaussian
-            gaussian_pos = particle_pos * self.scale - self.shift
-            undeformed_gaussian_pos = (
-                self.particle_init_position * self.scale - self.shift
-            )
-            disp_offset = gaussian_pos - undeformed_gaussian_pos.detach()
-            # gaussian_pos.requires_grad = True
-
-            simulated_video = render_gaussian_seq_w_mask_with_disp(
-                cam,
-                self.render_params,
-                undeformed_gaussian_pos.detach(),
-                self.top_k_index,
-                [disp_offset],
-                self.sim_mask_in_raw_gaussian,
-            )
-
-            # if self.apply_force:
-            #     simulate_video_w_force = render_gaussian_seq_w_mask_cam_seq_with_force_with_disp(
-            #         [cam],
-            #         self.render_params,
-            #         undeformed_gaussian_pos.detach(),
-            #         self.top_k_index,
-            #         [disp_offset],
-            #         self.sim_mask_in_raw_gaussian,
-            #         closest_idx,
-            #         render_force,
-            #         force_duration_steps,
-            #         hide_force=False
-            #     )
-
-            # print("debug", simulated_video.shape, gt_frame.shape, gaussian_pos.shape, init_xyzs.shape, density.shape, query_mask.sum().item())
-            rendered_video_list.append(simulated_video.detach())
-            # if self.apply_force:
-            #     rendered_video_w_force_list.append(simulate_video_w_force)
-
-            # Compute loss
-            loss = 0.0
-            # l2_loss = 0.5 * F.mse_loss(simulated_video, gt_frame, reduction="mean")
-            # loss = l2_loss * (1.0 - self.ssim) + (1.0 - ssim_loss) * self.ssim
-            if self.lambda_img_l2 > 0:
-                l2_loss = F.mse_loss(simulated_video, gt_frame, reduction="mean")
-                loss += self.lambda_img_l2 * l2_loss
-
-                if self.step < 1:
-                    # save each frame as image for visualization
-                    # print(f"check shape simulated_video {simulated_video.shape}, gt_frame {gt_frame.shape}") # [1, 3, 576, 1024], [1, 3, 576, 1024]
-                    # print(f"check range simulated_video {simulated_video.min().item()} - {simulated_video.max().item()}, gt_frame {gt_frame.min().item()} - {gt_frame.max().item()}") # simulated_video 0.019882982596755028 - 0.9924777150154114, gt_frame 0.0 - 1.0
-                    simulated_video_path = os.path.join(self.output_path, f"simulated_frame_{self.step:06d}_{start_time_idx:02d}.png")
-                    gt_frame_path = os.path.join(self.output_path, f"gt_frame_{self.step:06d}_{start_time_idx:02d}.png")
-                    simulated_video_img = simulated_video[0].detach().cpu().numpy().transpose(1, 2, 0)
-                    gt_frame_img = gt_frame[0].detach().cpu().numpy().transpose(1, 2, 0)
-                    simulated_video_img = Image.fromarray((simulated_video_img * 255).astype(np.uint8))
-                    gt_frame_img = Image.fromarray((gt_frame_img * 255).astype(np.uint8))
-                    simulated_video_img.save(simulated_video_path)
-                    gt_frame_img.save(gt_frame_path)       
-            else:
-                l2_loss = torch.tensor(0.0)
-
-            if self.lambda_img_ssim > 0:            
-                ssim_loss = compute_ssim(simulated_video, gt_frame)
-                loss += self.lambda_img_ssim * (1.0 - ssim_loss)
-            else:
-                ssim_loss = torch.tensor(0.0)
-
-            loss = loss * (self.args.loss_decay**end_time_idx)
-
-            if self.lambda_img_smoothness > 0:
-                sm_velo_loss = self.velo_fields.compute_smoothess_loss() * 10.0
-                # if not (do_velo_opt and start_time_idx == 0):
-                #     sm_velo_loss = sm_velo_loss.detach()
-                sm_spatial_loss = self.sim_fields.compute_smoothess_loss()
-
-                if do_velo_opt and start_time_idx == 0:
-                    sm_loss = (
-                        sm_velo_loss + sm_spatial_loss
-                    )  # typically 20 times larger than rendering loss
+                if self.lambda_img_ssim > 0:            
+                    ssim_loss = compute_ssim(simulated_video, gt_frame)
+                    loss += self.lambda_img_ssim * (1.0 - ssim_loss)
                 else:
-                    sm_loss = sm_spatial_loss
+                    ssim_loss = torch.tensor(0.0)
 
-                # loss = loss + sm_loss * self.tv_loss_weight
-                loss += self.lambda_img_smoothness * sm_loss
-            else:
-                sm_spatial_loss = torch.tensor(0.0)
-                sm_velo_loss = torch.tensor(0.0)
-                sm_loss = torch.tensor(0.0)
-            
-            if self.lambda_img_entropy > 0:
-                # loss = loss + entropy * self.args.entropy_reg
-                loss += self.lambda_img_entropy * entropy
-            else:
-                entropy = torch.tensor(0.0)
-            
-            if self.lambda_pos_l2 > 0:
-                # L2 loss
-                pos_L2_loss = F.mse_loss(gaussian_pos, gt_pos_frame)
+                loss = loss * (self.args.loss_decay**end_time_idx)
 
-                # TODO: 2025-02-25: verify the gradient computation with finite difference
-                pos_L2_loss = F.mse_loss(gaussian_pos, gt_pos_frame, reduction="none")
-                print(f"compute the pos_L2_loss, pos_L2_loss shape {pos_L2_loss.shape}, mean {pos_L2_loss.mean().item()}")
-                # save the pos_L2_loss for logging 
-                pos_L2_loss_np = pos_L2_loss.detach().cpu().numpy()
-                pos_L2_loss_path = os.path.join(self.output_path, f"pos_L2_loss_{self.step:06d}_{start_time_idx:02d}_FD_h_{self.FD_disturb_E}.npy")
-                np.save(pos_L2_loss_path, pos_L2_loss_np)
-                pos_L2_loss = pos_L2_loss.mean()
-                if self.step > 3:
-                    pdb.set_trace()
+                if self.lambda_img_smoothness > 0:
+                    sm_velo_loss = self.velo_fields.compute_smoothess_loss() * 10.0
+                    # if not (do_velo_opt and start_time_idx == 0):
+                    #     sm_velo_loss = sm_velo_loss.detach()
+                    sm_spatial_loss = self.sim_fields.compute_smoothess_loss()
+
+                    if do_velo_opt and start_time_idx == 0:
+                        sm_loss = (
+                            sm_velo_loss + sm_spatial_loss
+                        )  # typically 20 times larger than rendering loss
+                    else:
+                        sm_loss = sm_spatial_loss
+
+                    # loss = loss + sm_loss * self.tv_loss_weight
+                    loss += self.lambda_img_smoothness * sm_loss
+                else:
+                    sm_spatial_loss = torch.tensor(0.0)
+                    sm_velo_loss = torch.tensor(0.0)
+                    sm_loss = torch.tensor(0.0)
+                
+                if self.lambda_img_entropy > 0:
+                    # loss = loss + entropy * self.args.entropy_reg
+                    loss += self.lambda_img_entropy * entropy
+                else:
+                    entropy = torch.tensor(0.0)
+                
+                if self.lambda_pos_l2 > 0:
+
+                    if self.save_FD_loss:
+                        # TODO: 2025-02-25: verify the gradient computation with finite difference
+                        pos_L2_loss = F.mse_loss(gaussian_pos, gt_pos_frame, reduction="none")
+                        print(f"compute the pos_L2_loss, pos_L2_loss shape {pos_L2_loss.shape}, mean {pos_L2_loss.mean().item()}")
+                        # save the pos_L2_loss for logging 
+                        pos_L2_loss_np = pos_L2_loss.detach().cpu().numpy()
+                        pos_L2_loss_path = os.path.join(self.output_path, f"pos_L2_loss_{self.step:06d}_{start_time_idx:02d}_FD_h_{self.FD_perturb_E}.npy")
+                        np.save(pos_L2_loss_path, pos_L2_loss_np)
+                        pos_L2_loss = pos_L2_loss.mean()
+                        
+                        if self.step > 3:
+                            pdb.set_trace()
+                    
+                    else:
+                        # original implementation to compute L2 loss
+                        # L2 loss
+                        pos_L2_loss = F.mse_loss(gaussian_pos, gt_pos_frame)
+
+                    loss += self.lambda_pos_l2 * pos_L2_loss
+
+                    if self.step < 1:
+                        # save the gaussian_pos and gt_pos for visualization
+                        gaussian_pos_path = os.path.join(self.output_path, f"gaussian_pos_{self.step:06d}_{start_time_idx:02d}.npy")
+                        gt_pos_path = os.path.join(self.output_path, f"gt_pos_{self.step:06d}_{start_time_idx:02d}.npy")
+                        np.save(gaussian_pos_path, gaussian_pos.detach().cpu().numpy())
+                        np.save(gt_pos_path, gt_pos_frame.detach().cpu().numpy())
+                    
+                else:
+                    pos_L2_loss = torch.tensor(0.0)
 
                 
-                loss += self.lambda_pos_l2 * pos_L2_loss
-
-                if self.step < 1:
-                    # save the gaussian_pos and gt_pos for visualization
-                    gaussian_pos_path = os.path.join(self.output_path, f"gaussian_pos_{self.step:06d}_{start_time_idx:02d}.npy")
-                    gt_pos_path = os.path.join(self.output_path, f"gt_pos_{self.step:06d}_{start_time_idx:02d}.npy")
-                    np.save(gaussian_pos_path, gaussian_pos.detach().cpu().numpy())
-                    np.save(gt_pos_path, gt_pos_frame.detach().cpu().numpy())
-                
-            else:
-                pos_L2_loss = torch.tensor(0.0)
-
-            
-            if self.lambda_pos_chamfer > 0:
-                # print(f"compute position loss, gaussian_pos shape {gaussian_pos.shape}, gt_pos_frame shape {gt_pos_frame.shape}") # [5342, 3], [5342, 3]
-                pos_chamfer_loss, _ = chamfer_distance(gaussian_pos.unsqueeze(0), gt_pos_frame.unsqueeze(0))
-                loss += self.lambda_pos_chamfer * pos_chamfer_loss
-            else:
-                pos_chamfer_loss = torch.tensor(0.0)
+                if self.lambda_pos_chamfer > 0:
+                    # print(f"compute position loss, gaussian_pos shape {gaussian_pos.shape}, gt_pos_frame shape {gt_pos_frame.shape}") # [5342, 3], [5342, 3]
+                    pos_chamfer_loss, _ = chamfer_distance(gaussian_pos.unsqueeze(0), gt_pos_frame.unsqueeze(0))
+                    loss += self.lambda_pos_chamfer * pos_chamfer_loss
+                else:
+                    pos_chamfer_loss = torch.tensor(0.0)
 
 
 
-            # divide d the eentire loss by accumulateive size
-            loss = loss / self.args.compute_window
+                # divide d the eentire loss by accumulateive size
+                loss = loss / self.args.compute_window
 
-            print(f"check loss details, img_l2_loss {l2_loss.item()}, pos_L2_loss {pos_L2_loss.item()}, pos_chamfer_loss {pos_chamfer_loss.item()}, sm_spatial_loss {sm_spatial_loss.item()}, sm_velo_loss {sm_velo_loss.item()}, entropy {entropy.item()}, loss {loss.item()}")
+                print(f"check loss details, img_l2_loss {l2_loss.item()}, pos_L2_loss {pos_L2_loss.item()}, pos_chamfer_loss {pos_chamfer_loss.item()}, sm_spatial_loss {sm_spatial_loss.item()}, sm_velo_loss {sm_velo_loss.item()}, entropy {entropy.item()}, loss {loss.item()}")
 
-            loss.backward()
+                loss.backward()
 
-            # from IPython import embed; embed()
-            # print(self.E_nu_list[1].grad)
+
 
             particle_pos, particle_velo, particle_F, particle_C = (
                 particle_pos.detach(),
@@ -1497,7 +1665,12 @@ class Trainer:
             youngs_modulus = youngs_modulus_ * young_scaling
         init_xyzs = self.particle_init_position.clone()
 
+        print(f"In inference, check init_velocity shape {init_velocity.shape}, range min {init_velocity.min()}, max {init_velocity.max()}, query_mask {query_mask.shape}") # 
+
         init_velocity[query_mask, :] = init_velocity[query_mask, :] * velo_scaling
+        # print(f"In inference, check init_velocity after scaling, range min {init_velocity.min()}, max {init_velocity.max()}") # 
+        # print(f"check youngs_modulus shape {youngs_modulus.shape}, range min {youngs_modulus.min()}, max {youngs_modulus.max()}") # 
+        # pdb.set_trace()
 
         num_particles = init_xyzs.shape[0]
         # reset state
@@ -1929,11 +2102,15 @@ def parse_args():
     parser.add_argument("--initE", type=float, default=1e5)
     parser.add_argument("--postfix", type=str, default="")
     parser.add_argument("--homo_material", action="store_true", default=False, help="option to set homogeneous material, i.e. E is a float instead of spatial field")
-    parser.add_argument("--FD_disturb_E", type=float, default=0, help="a step size to disturb E to compute finite difference")
+    parser.add_argument("--FD_perturb_E", type=float, default=0, help="a step size to perturb E to compute finite difference, only used when save_FD_loss is set to True")
+    parser.add_argument("--extra_no_grad_steps", type=int, default=0, help="detach the gradient where force is applied")
+    parser.add_argument("--save_FD_loss", action="store_true", default=False, help="option to save FD loss to compute ")
+    parser.add_argument("--save_FD_grad", action="store_true", default=False, help="option to roll out two simulations and compute E grad with Finite Difference")
+    parser.add_argument("--total_substeps", type=int, default=0, help="if total_substeps > 0, we compute the gradient based on substeps, not frames (add this option for debugging purpose)")
 
     args, extra_args = parser.parse_known_args()
 
-    args.postfix += f"_lambda_{args.lambda_img_l2}_{args.lambda_img_ssim}_{args.lambda_img_entropy}_{args.lambda_img_smoothness}_{args.lambda_pos_l2}_{args.lambda_pos_chamfer}_FD_{args.FD_disturb_E}"
+    args.postfix += f"_lambda_{args.lambda_img_l2}_{args.lambda_img_ssim}_{args.lambda_img_entropy}_{args.lambda_img_smoothness}_{args.lambda_pos_l2}_{args.lambda_pos_chamfer}_FD_{args.FD_perturb_E}"
     cfg = create_config(args.config, args, extra_args)
 
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
