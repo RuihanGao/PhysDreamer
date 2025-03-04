@@ -11,6 +11,8 @@ def compute_loss_kernel(particle_x: wp.array(dtype=wp.vec3), loss: wp.array(dtyp
     tid = wp.tid()
     wp.atomic_add(loss, 0, particle_x[tid][0] + particle_x[tid][1] + particle_x[tid][2])
 
+# TODO: this is a too simplified version of Finite Difference Gradient
+# Implement another version of Finite Difference Gradient that perturbs the entire mpm_state
 
 def finite_difference_grad(func, x, epsilon=1e-4):
     """Computes numerical gradients using finite differences."""
@@ -29,6 +31,8 @@ def finite_difference_grad(func, x, epsilon=1e-4):
         grad.flat[i] = (loss_pos - loss_neg) / (2 * epsilon)
 
     return grad
+
+
     
 # --- COMPUTE NUMERICAL GRADIENTS ---
 def loss_fn(particle_x_numpy):
@@ -53,8 +57,7 @@ def loss_fn(particle_x_numpy):
 
 
 # Run the unit test
-if __name__ == "__main__":
-
+if __name__ == "__main__":    
     """Unit test for verifying gradient computation in p2g2p_differentiable."""
     # Define number of particles and grid size
     n_particles = 10
@@ -64,9 +67,13 @@ if __name__ == "__main__":
     device = "cuda:0"
     wp.init()
 
-    # Randomly initialize particle positions and velocities
-    particle_x = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
-    particle_v = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
+    # Create an instance of MPM solver
+    solver = MPMWARPDiff(n_particles, n_grid, grid_lim, device=device)
+
+    # Initialize MPM Model and State
+    mpm_model = MPMModelStruct()
+    mpm_model.init(n_particles, device=device, requires_grad=True)
+    mpm_model.init_other_params(n_grid=n_grid, grid_lim=grid_lim, device=device)
 
     mpm_state = MPMStateStruct()
     mpm_state.init(n_particles, device=device, requires_grad=True)
@@ -74,16 +81,12 @@ if __name__ == "__main__":
     next_state = MPMStateStruct()
     next_state.init(n_particles, device=device, requires_grad=True)
 
-    # Initialize MPM Model and State
-    mpm_model = MPMModelStruct()
-    mpm_model.init(n_particles, device=device, requires_grad=True)
-    mpm_model.init_other_params(n_grid=n_grid, grid_lim=grid_lim, device=device)
-
-    solver = MPMWARPDiff(n_particles, n_grid, grid_lim, device=device)
     # Set material properties
     solver.set_E_nu(mpm_model, E=1000.0, nu=0.3, device=device)
 
-
+    # Randomly initialize particle positions and velocities
+    particle_x = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
+    particle_v = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
 
     # Copy to MPM state
     mpm_state.particle_x = from_torch_safe(particle_x, dtype=wp.vec3, requires_grad=True)
@@ -92,11 +95,7 @@ if __name__ == "__main__":
     # Allocate a loss array
     loss_array = torch.zeros(1, dtype=torch.float32, device=device)
     loss_array = wp.from_torch(loss_array, requires_grad=True)
-    particle_x_np = mpm_state.particle_x.numpy()
-    loss_array_np = loss_array.numpy()
-    print(f"check particle_x {type(mpm_state.particle_x)}, {particle_x_np.shape}, loss_array {type(loss_array)}, {loss_array_np.shape}")
-    pdb.set_trace()
-    
+
     # --- COMPUTE ANALYTICAL GRADIENTS ---
     with MyTape() as tape:
         solver.p2g2p_differentiable(mpm_model, mpm_state, next_state, dt=0.01, device=device)
@@ -120,6 +119,7 @@ if __name__ == "__main__":
     print(f"Analytical Gradient Shape: {analytical_grad.shape}")
 
     # Compute numerical gradient using finite differences
+    # TODO: here you cannot just reuse a single particle_x. need to re-initialize the whole mpm_state with particle_x, particle_v, etc.
     particle_x_numpy = particle_x.detach().cpu().numpy()
     numerical_grad = finite_difference_grad(loss_fn, particle_x_numpy)
 
