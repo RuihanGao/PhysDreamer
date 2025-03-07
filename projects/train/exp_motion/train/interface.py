@@ -147,9 +147,7 @@ class MPMDifferentiableSimulation(autograd.Function):
         ctx.tape = cond_tape.tape
         ctx.device = device
         ctx.num_particles = num_particles
-
         ctx.next_state_list = next_state_list
-
         ctx.save_for_backward(density_change_mask)
 
         last_state = next_state_list[-1]
