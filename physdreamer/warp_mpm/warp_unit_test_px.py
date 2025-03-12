@@ -9,6 +9,10 @@ from run_gaussian_static import load_gaussians, get_volume
 import torch.autograd as autograd
 import pdb
 
+""""
+Change the finite different gradient check item from E to particle_x
+"""
+
 @wp.kernel
 def compute_loss_kernel_vec3(particle_x: wp.array(dtype=wp.vec3), loss: wp.array(dtype=float)):
     tid = wp.tid()
@@ -23,7 +27,7 @@ def compute_loss_kernel_mat33(particle_stress: wp.array(dtype=wp.mat33), loss: w
 
 class SimulationInterface(autograd.Function):
     @staticmethod
-    def forward(ctx, E_tensor):
+    def forward(ctx, init_x, init_v):
         """
         Forward simulation and loss computation for a given Young’s modulus E.
         """
@@ -58,6 +62,7 @@ class SimulationInterface(autograd.Function):
 
         # Initialize model parameters
         nu_tensor = torch.ones(n_particles, dtype=torch.float32, device=device) * 0.3
+        E_tensor = torch.ones(n_particles, dtype=torch.float32, device=device) * 1e6
         solver.set_E_nu_from_torch(mpm_model, E_tensor, nu_tensor, device=device)
         solver.prepare_mu_lam(mpm_model, mpm_state, device)
         
@@ -67,11 +72,6 @@ class SimulationInterface(autograd.Function):
         }
         solver.set_parameters_dict(mpm_model, mpm_state, material_params)
 
-        # Initialize particle states
-        init_x = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
-        init_v = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
-        volume_array = get_volume(init_x.detach().cpu().numpy())
-        init_volume = torch.tensor(volume_array, dtype=torch.float32, device=device, requires_grad=True)
 
 
         mpm_state.particle_x = from_torch_safe(init_x, dtype=wp.vec3, requires_grad=True)
@@ -207,7 +207,16 @@ def check_autodiff(inputs: list, eps=1e-6):
     # check inputs0 <class 'list'>, [tensor([1000000., 1000000., 1000000., 1000000., 1000000., 1000000., 1000000.,
     #     1000000., 1000000., 1000000.], device='cuda:0', requires_grad=True)]
 
-    outputs0 = SimulationInterface.apply(*inputs0)
+
+
+    # Initialize particle states
+    init_x = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
+    init_v = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
+    volume_array = get_volume(init_x.detach().cpu().numpy())
+    init_volume = torch.tensor(volume_array, dtype=torch.float32, device=device, requires_grad=True)
+
+
+    outputs0 = SimulationInterface.apply(*inputs0, init_x, init_v, init_volume)
     if isinstance(outputs0, torch.Tensor):
         outputs0 = [outputs0]
     coeffs = [torch.rand_like(output) for output in outputs0]
@@ -216,7 +225,7 @@ def check_autodiff(inputs: list, eps=1e-6):
     pdb.set_trace()
     loss0.backward()
 
-    outputs1 = SimulationInterface.apply(*inputs1)
+    outputs1 = SimulationInterface.apply(*inputs1, init_x, init_v, init_volume)
     if isinstance(outputs1, torch.Tensor):
         outputs1 = [outputs1]
     loss1 = sum([(coeff * output).sum() for coeff, output in zip(coeffs, outputs1)])

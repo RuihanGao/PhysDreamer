@@ -887,8 +887,8 @@ class Trainer:
 
         gt_pos = data["gt_pos"][0, 1:, ...] # torch.Size([1, 91, 5342, 3]) -> [90, 5342, 3]
         print(f"check loading gt pos in train_one_step: {gt_pos.shape}") # torch.Size([1, 91, 5342, 3])
-        gt_pos_substep = data["gt_pos_substep"]
-        if gt_pos_substep is not None:
+        if "gt_pos_substep" in data:
+            gt_pos_substep = data["gt_pos_substep"]
             gt_pos_substep = gt_pos_substep[0, 1:, ...]
             print(f"check gt_pos_substep in train_one_step: {gt_pos_substep.shape}")
         else:
