@@ -894,11 +894,15 @@ class Trainer:
         else:
             gt_pos_substep = None
         
-
-        # window_size = int(self.window_size_schduler.compute_state(self.step)[0]) # number of frames to run simulation in this training iteration
-        # 2025-02-25 For debugging purpose, fix the window_size to 1
-        window_size = 1
+        # Set number of frames to run simulation in this training iteration
+        if self.args.window_size > 0:
+            # set to a fixed number, e.g. One Frame, for debugging
+            window_size = self.args.window_size
+        else:
+            # set to a dynamic number with a scheduler (PhysDreamer setting)
+            window_size = int(self.window_size_schduler.compute_state(self.step)[0]) # 
         print(f"window_size {window_size}") 
+
         stop_velo_opt_thres = 15
         do_velo_opt = not self.freeze_velo
         if not do_velo_opt:
@@ -1014,19 +1018,27 @@ class Trainer:
                     raise NotImplementedError(f"Finite difference gradient is not supported with checkpointing  for MPMDifferentiableSimulationWCheckpoint")
                 assert self.homo_material, "Finite difference gradient is only supported for homogeneous material"
                 # roll out two forward simulations
-                perturb_E = 1e-5
-                particle_pos, particle_velo, particle_F, particle_C, particle_cov = (
+                delta_E = 1e-5
+                # duplicate mpm_state, mpm_solver, and mpm_model
+                perturb_state = self.mpm_state.partial_clone()
+                perturb_model = MPMModelStruct()
+                perturb_model.init(num_particles, device=device, requires_grad=True)
+                perturb_model.init_other_params(n_grid=self.mpm_model.n_grid, grid_lim=1.0, device=device)
+                perturb_E = self.E_nu_list[0].detach() + delta_E
+                print(f"check perturb_E {perturb_E}, requires_grad {perturb_E.requires_grad}") # perturb_E 0.40001001954078674, requires_grad False
+
+                perturb_particle_pos, perturb_particle_velo, perturb_particle_F, perturb_particle_C, perturb_particle_cov = (
                         MPMDifferentiableSimulationClean.apply(
                             self.mpm_solver,
-                            self.mpm_state,
-                            self.mpm_model,
+                            perturb_state,
+                            perturb_model,
                             substep_size,
                             num_step_with_grad,
                             particle_pos,
                             particle_velo,
                             particle_F,
                             particle_C,
-                            self.E_nu_list[0]*1e7,
+                            perturb_E*1e7,
                             self.E_nu_list[1],
                             density,
                             query_mask,
@@ -1038,40 +1050,34 @@ class Trainer:
                         )
                     )
                 # substep-3: render gaussian
-                gaussian_pos = particle_pos * self.scale - self.shift
-                undeformed_gaussian_pos = (
-                    self.particle_init_position * self.scale - self.shift
-                )
-                disp_offset = gaussian_pos - undeformed_gaussian_pos.detach()
-                # gaussian_pos.requires_grad = True
+                perturb_gaussian_pos = perturb_particle_pos * self.scale - self.shift
+                # undeformed_gaussian_pos = (
+                #     self.particle_init_position * self.scale - self.shift
+                # )
+                # perturb_disp_offset = perturb_gaussian_pos - undeformed_gaussian_pos.detach()
+                # # gaussian_pos.requires_grad = True
 
-                simulated_video = render_gaussian_seq_w_mask_with_disp(
-                    cam,
-                    self.render_params,
-                    undeformed_gaussian_pos.detach(),
-                    self.top_k_index,
-                    [disp_offset],
-                    self.sim_mask_in_raw_gaussian,
-                )
+                # perturb_simulated_video = render_gaussian_seq_w_mask_with_disp(
+                #     cam,
+                #     self.render_params,
+                #     undeformed_gaussian_pos.detach(),
+                #     self.top_k_index,
+                #     [perturb_disp_offset],
+                #     self.sim_mask_in_raw_gaussian,
+                # )
 
-                rendered_video_list.append(simulated_video.detach())
 
-                loss_wo_perturbation = 0.0
+                loss_w_perturbation = 0.0
                 if self.lambda_pos_l2 > 0:
                     # TODO: 2025-02-25: verify the gradient computation with finite difference
-                    pos_L2_loss_wo_perturbation = F.mse_loss(gaussian_pos, gt_pos_frame, reduction="none")
-                    print(f"compute the pos_L2_loss, pos_L2_loss shape {pos_L2_loss.shape}, mean {pos_L2_loss.mean().item()}")
-                    pos_L2_loss = pos_L2_loss_wo_perturbation.mean()
-                    
-                    if self.step > 3:
-                        pdb.set_trace()
-                        
-                    loss_wo_perturbation += self.lambda_pos_l2 * pos_L2_loss
+                    pos_L2_loss_w_perturbation = F.mse_loss(perturb_gaussian_pos, gt_pos_frame, reduction="none")
+                    print(f"compute pos_L2_loss_w_perturbation, shape {pos_L2_loss_w_perturbation.shape}, mean {pos_L2_loss_w_perturbation.mean().item()}")
+                    # pos_L2_loss = pos_L2_loss_w_perturbation.mean()
+                    loss_w_perturbation += self.lambda_pos_l2 * pos_L2_loss_w_perturbation
                 else:
                     raise NotImplementedError("Finite difference gradient is only supported for pos L2 loss. Add code for other losses.")
-                
-                raise NotImplementedError(f"Finish the implementation for Finite difference here")
-                # TODO: reset the mpm_model and mpm_state to initial state
+     
+            
                 particle_pos, particle_velo, particle_F, particle_C, particle_cov = (
                         MPMDifferentiableSimulationClean.apply(
                             self.mpm_solver,
@@ -1114,32 +1120,32 @@ class Trainer:
 
                 rendered_video_list.append(simulated_video.detach())
 
-                loss_w_perturbation = 0.0
+                loss_wo_perturbation = 0.0
                 if self.lambda_pos_l2 > 0:
                     # TODO: 2025-02-25: verify the gradient computation with finite difference
-                    pos_L2_loss_w_perturbation = F.mse_loss(gaussian_pos, gt_pos_frame, reduction="none")
-                    print(f"compute the pos_L2_loss, pos_L2_loss shape {pos_L2_loss.shape}, mean {pos_L2_loss.mean().item()}")
-                    pos_L2_loss = pos_L2_loss_wo_perturbation.mean()
-                    
-                    if self.step > 3:
-                        pdb.set_trace()
-                        
-                    loss_w_perturbation += self.lambda_pos_l2 * pos_L2_loss
+                    pos_L2_loss_wo_perturbation = F.mse_loss(gaussian_pos, gt_pos_frame, reduction="none")
+                    print(f"compute pos_L2_loss_wo_perturbation, shape {pos_L2_loss_wo_perturbation.shape}, mean {pos_L2_loss_wo_perturbation.mean().item()}")
+                    # pos_L2_loss = pos_L2_loss_wo_perturbation.mean()  
+                    loss_wo_perturbation += self.lambda_pos_l2 * pos_L2_loss_wo_perturbation
                 else:
                     raise NotImplementedError("Finite difference gradient is only supported for pos L2 loss. Add code for other losses.")
+                pos_L2_loss = pos_L2_loss_wo_perturbation.mean()
+                loss = pos_L2_loss
 
-                E_grad_FD = (loss_w_perturbation - loss_wo_perturbation) / perturb_E 
-                E_grad_FD = E_grad_FD.mean(axis=1) # shape [N,]
+                E_grad_FD_spatial = (loss_w_perturbation - loss_wo_perturbation) / perturb_E # [N, 3]
+                E_grad_FD_spatial = E_grad_FD_spatial.mean(axis=1) # shape [N,]
+                E_grad_FD = E_grad_FD_spatial.mean() # shape [1]
 
-                print(f"compute E_grad_FD, E_grad_FD shape {E_grad_FD.shape}, mean {E_grad_FD.mean().item()}, std {E_grad_FD.std().item()}")    
-                if self.step > 3: 
-                    pdb.set_trace()
-                else:
+                print(f"compute E_grad_FD for step {self.step}, E_grad_FD_spatial min {E_grad_FD_spatial.min().item()}, max {E_grad_FD_spatial.max().item()}, E_grad_FD {E_grad_FD.item()}")
+                # assign the gradient to the E_nu_list[0]
+                self.E_nu_list[0].grad = E_grad_FD    
+
+                if self.step <= 3:
                     # save the gradient to numpy array
-                    E_grad_FD_np = E_grad_FD.detach().cpu().numpy()
-                    E_grad_FD_np = E_grad_FD_np.reshape(-1, 1)
-                    E_grad_FD_np_path = os.path.join(self.wandb_folder, f"E_grad_FD_{self.step:06d}_{start_time_idx:02d}.npy")
+                    E_grad_FD_np = E_grad_FD_spatial.detach().cpu().numpy()
+                    E_grad_FD_np_path = os.path.join(self.output_path, f"E_grad_FD_{self.step:06d}_{start_time_idx:02d}.npy")
                     np.save(E_grad_FD_np_path, E_grad_FD_np)
+
 
 
             else:
@@ -1383,8 +1389,8 @@ class Trainer:
 
                 loss.backward()
 
-
-
+            E_grad = self.E_nu_list[0].grad
+            print(f"check gradient for E, step {self.step}, grad {E_grad.item()}")
             particle_pos, particle_velo, particle_F, particle_C = (
                 particle_pos.detach(),
                 particle_velo.detach(),
@@ -1396,12 +1402,13 @@ class Trainer:
                 psnr = compute_psnr(simulated_video, gt_frame).mean()
                 log_loss_dict["psnr"].append(psnr.item())
                 log_loss_dict["loss"].append(loss.item())
-                log_loss_dict["l2_loss"].append(l2_loss.item())
-                log_loss_dict["ssim"].append(ssim_loss.item())
-                log_loss_dict["sm_loss"].append(sm_loss.item())
-                log_loss_dict["entropy"].append(entropy.item())
                 log_loss_dict["pos_L2_loss"].append(pos_L2_loss.item())
-                log_loss_dict["pos_chamfer_loss"].append(pos_chamfer_loss.item())
+                if not self.save_FD_grad:
+                    log_loss_dict["l2_loss"].append(l2_loss.item())
+                    log_loss_dict["ssim"].append(ssim_loss.item())
+                    log_loss_dict["sm_loss"].append(sm_loss.item())
+                    log_loss_dict["entropy"].append(entropy.item())
+                    log_loss_dict["pos_chamfer_loss"].append(pos_chamfer_loss.item())
 
                 print(
                     f"step {self.step}, start_time_idx {start_time_idx}, psnr {psnr.item()}, end_time_idx {end_time_idx}, youngs_modulus max {youngs_modulus.max().item()} min {youngs_modulus.min().item()}"
@@ -1510,23 +1517,40 @@ class Trainer:
 
         if accelerator.is_main_process and (self.step % self.wandb_iters == 0):
             with torch.no_grad():
-                wandb_dict = {
-                    # "nu_grad_norm": nu_grad_norm,
-                    "spatial_grad_norm": spatial_grad_norm,
-                    "velo_grad_norm": velo_grad_norm,
-                    "nu": self.E_nu_list[1].item(),
-                    # "mean_density": density.mean().item(),
-                    "mean_E": youngs_modulus.mean().item(),
-                    "max_E": youngs_modulus.max().item(),
-                    "min_E": youngs_modulus.min().item(),
-                    "smoothness_loss": sm_loss.item(),
-                    "window_size": window_size,
-                    "max_particle_velo": particle_velo.max().item(),
-                    "init_velo_mean": init_velo_mean,
-                    "init_velo_max": init_velo_max,
-                    "E_nu_list[0]": self.E_nu_list[0].item(),
-                    "E_nu_list[1]": self.E_nu_list[1].item(),
-                }
+                if self.save_FD_grad:
+                    wandb_dict = {
+                        "nu": self.E_nu_list[1].item(),
+                        # "mean_density": density.mean().item(),
+                        "mean_E": youngs_modulus.mean().item(),
+                        "max_E": youngs_modulus.max().item(),
+                        "min_E": youngs_modulus.min().item(),
+                        "window_size": window_size,
+                        "max_particle_velo": particle_velo.max().item(),
+                        "init_velo_mean": init_velo_mean,
+                        "init_velo_max": init_velo_max,
+                        "E_nu_list[0]": self.E_nu_list[0].item(),
+                        "E_nu_list[1]": self.E_nu_list[1].item(),
+                        "E_grad": E_grad.item()
+                    }
+                else:
+                    wandb_dict = {
+                        # "nu_grad_norm": nu_grad_norm,
+                        "spatial_grad_norm": spatial_grad_norm,
+                        "velo_grad_norm": velo_grad_norm,
+                        "nu": self.E_nu_list[1].item(),
+                        # "mean_density": density.mean().item(),
+                        "mean_E": youngs_modulus.mean().item(),
+                        "max_E": youngs_modulus.max().item(),
+                        "min_E": youngs_modulus.min().item(),
+                        "smoothness_loss": sm_loss.item(),
+                        "window_size": window_size,
+                        "max_particle_velo": particle_velo.max().item(),
+                        "init_velo_mean": init_velo_mean,
+                        "init_velo_max": init_velo_max,
+                        "E_nu_list[0]": self.E_nu_list[0].item(),
+                        "E_nu_list[1]": self.E_nu_list[1].item(),
+                        "E_grad": E_grad.item()
+                    }
 
                 wandb_dict.update(log_psnr_dict)
                 simulated_video = self.inference(cam, substep=num_substeps)
@@ -2107,6 +2131,7 @@ def parse_args():
     parser.add_argument("--save_FD_loss", action="store_true", default=False, help="option to save FD loss to compute ")
     parser.add_argument("--save_FD_grad", action="store_true", default=False, help="option to roll out two simulations and compute E grad with Finite Difference")
     parser.add_argument("--total_substeps", type=int, default=0, help="if total_substeps > 0, we compute the gradient based on substeps, not frames (add this option for debugging purpose)")
+    parser.add_argument("--window_size", type=int, default=0, help="set to a fixed number if window_size > 0; otherwise, use default scheduler as PhysDreamer")
 
     args, extra_args = parser.parse_known_args()
 
