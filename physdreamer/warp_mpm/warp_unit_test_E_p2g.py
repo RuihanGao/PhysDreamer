@@ -9,6 +9,17 @@ from run_gaussian_static import load_gaussians, get_volume
 import torch.autograd as autograd
 import pdb
 
+"""
+Test the gradient computation of Young’s modulus E.
+
+Computation graph: 
+E -> mu/lam
+
+
+Returns:
+    _type_: _description_
+"""
+
 @wp.kernel
 def compute_loss_kernel_vec3(particle_x: wp.array(dtype=wp.vec3), loss: wp.array(dtype=float)):
     tid = wp.tid()
@@ -56,7 +67,7 @@ class SimulationInterface(autograd.Function):
             init_v,
             device=device,
             requires_grad=True,
-            n_grid=100,
+            n_grid=n_grid,
             grid_lim=1.0,
         )
 
@@ -90,28 +101,14 @@ class SimulationInterface(autograd.Function):
         next_state.reset_density(density_tensor.clone(), device=device, update_mass=True)
 
         solver.set_E_nu_from_torch(mpm_model, E_tensor, nu_tensor, device=device)
-        solver.prepare_mu_lam(mpm_model, mpm_state, device)
-
-        print(f"check model.mu: \n {mpm_model.mu.numpy()}")
-        print(f"check model.lam: \n {mpm_model.lam.numpy()}")
-        pdb.set_trace()
-
-        # Allocate a loss array
-        loss_array = wp.zeros(1, dtype=float, device=device, requires_grad=True)
+        # solver.prepare_mu_lam(mpm_model, mpm_state, device) # move inside the tape to obtain correct gradient for E
 
         # Run forward simulation
         wp_tape = MyTape()
         cond_tape: CondTape = CondTape(wp_tape, True)
 
         with cond_tape:
-            # solver.p2g2p_differentiable(mpm_model, mpm_state, next_state, dt=0.01, device=device)
-
-            # wp.launch(
-            #     kernel=compute_loss_kernel,
-            #     dim=n_particles,
-            #     inputs=[next_state.particle_x, loss_array],
-            #     device=device,
-            # )
+            solver.prepare_mu_lam(mpm_model, mpm_state, device)
 
             wp.launch(
                 kernel=zero_grid,  # gradient might gone
@@ -132,22 +129,22 @@ class SimulationInterface(autograd.Function):
                 dim=n_particles,
                 inputs=[mpm_state, mpm_model, dt],
                 device=device,
-            )  # apply p2g'
+            )  # apply p2g', update state.grid_v_in and state.grid_m
 
 
-            wp.launch(
-                kernel=grid_normalization_and_gravity,
-                dim=(grid_size),
-                inputs=[mpm_state, mpm_model, dt],
-                device=device,
-            )
+            # wp.launch(
+            #     kernel=grid_normalization_and_gravity,
+            #     dim=(grid_size),
+            #     inputs=[mpm_state, mpm_model, dt],
+            #     device=device,
+            # )
 
-            wp.launch(
-                kernel=g2p_differentiable,
-                dim=n_particles,
-                inputs=[mpm_state, next_state, mpm_model, dt],
-                device=device,
-            )  # x, v, C, F_trial are updated
+            # wp.launch(
+            #     kernel=g2p_differentiable,
+            #     dim=n_particles,
+            #     inputs=[mpm_state, next_state, mpm_model, dt],
+            #     device=device,
+            # )  # x, v, C, F_trial are updated
 
         ctx.tape = cond_tape.tape
         ctx.mpm_solver = solver
@@ -156,46 +153,62 @@ class SimulationInterface(autograd.Function):
         ctx.next_state = next_state
         ctx.n_particles = n_particles
         ctx.save_for_backward(E_tensor)
-        particle_pos = wp.to_torch(next_state.particle_x).detach().clone()
-        return particle_pos
+        grid_v_in_torch = wp.to_torch(mpm_state.grid_v_in).detach().clone()  # shape (n_grid, 3)
+        print(f"check grid_v_in_torch: \n{grid_v_in_torch}")
+
+        return grid_v_in_torch
+
 
     @staticmethod
-    @staticmethod
-    def backward(ctx, out_pos_grad):
+    def backward(ctx, out_grid_vin_grad):
         # Retrieve the tape. Backward pass through the tape
         tape = ctx.tape
+        solver = ctx.mpm_solver
+        mpm_model = ctx.mpm_model
+        mpm_state = ctx.mpm_state
+        next_state = ctx.next_state
         n_particles = ctx.n_particles
-        last_state = ctx.next_state
-        grad_pos_wp = from_torch_safe(out_pos_grad.contiguous(), dtype=wp.vec3, requires_grad=False)
-        target_pos_detach = wp.clone(last_state.particle_x, device=device, requires_grad=False)
-        print(f"in custom backward, check out_pos_grad: {out_pos_grad.shape}")
+        E_tensor, = ctx.saved_tensors
+
+        # Ensure the gradient tensor is contiguous before passing to Warp
+        out_grid_vin_grad = out_grid_vin_grad.contiguous() # shape (n_grid, n_grid, n_grid, 3)
+        # Convert to Warp tensor
+        grad_vin_wp = from_torch_safe(out_grid_vin_grad, dtype=wp.vec3, requires_grad=False)
+
+        # Allocate memory for scalar loss in Warp
+        loss_wp = wp.zeros(1, dtype=float, device=device, requires_grad=True)
+
+        # Compute loss gradient in Warp
+        grid_size = (mpm_model.grid_dim_x, mpm_model.grid_dim_y, mpm_model.grid_dim_z)
 
         with tape:
-            loss_wp = torch.zeros(1, device=device)
-            loss_wp = wp.from_torch(loss_wp, requires_grad=True)
             wp.launch(
-                compute_posloss_with_grad, 
-                dim=n_particles,
-                inputs=[
-                    last_state,
-                    target_pos_detach,
-                    grad_pos_wp,
-                    0.5,
-                    loss_wp,
+                compute_grid_vin_loss_with_grad,
+                dim=grid_size,
+                inputs=[mpm_state,
+                        grad_vin_wp,
+                        1.0,
+                        loss_wp,
                 ],
                 device=device,
             )
 
+        # Backpropagate through the computational graph
         print(f"check loss_wp in custom backward: {loss_wp.numpy()}")
         tape.backward(loss_wp)
-        E_grad_wp = ctx.mpm_model.E.grad
-        px_grad_np = ctx.mpm_state.particle_x.grad.numpy()
-        pv_grad_np = ctx.mpm_state.particle_v.grad.numpy()
-        print(f"check E_grad_wp: {E_grad_wp.numpy()}")
-        print(f"check px_grad_np: \n {px_grad_np}")
-        print(f"check pv_grad_np: \n {pv_grad_np}")
 
-        return wp.to_torch(E_grad_wp).detach().clone(), None, None, None, None  # No gradients for init_x, init_v, init_volume, init_cov
+        grid_vin_grad_wp = mpm_state.grid_v_in.grad
+        # print(f"check grid_vin_grad_wp: {grid_vin_grad_wp.numpy()}") # all ones
+        stress_grad_wp = mpm_state.particle_stress.grad
+        print(f"check stress_grad_wp: {stress_grad_wp.numpy()}")
+        mu_grad_wp = mpm_model.mu.grad
+        # print(f"check mu_grad_wp: {mu_grad_wp.numpy()}")
+        lam_grad_wp = mpm_model.lam.grad
+        # print(f"check lam_grad_wp: {lam_grad_wp.numpy()}") # TODO: somehow the lam_grad is all zero.
+        E_grad_wp = mpm_model.E.grad
+        E_grad_torch = wp.to_torch(E_grad_wp).detach().clone()
+        # print(f"check E_grad_wp: {E_grad_wp.numpy()}")
+        return E_grad_torch, None, None, None, None  # No gradients for init_x, init_v, init_volume, init_cov
 
 def check_autodiff(E_tensor, init_x, init_v, init_volume, init_cov, eps=1e-6):
     """
@@ -210,22 +223,24 @@ def check_autodiff(E_tensor, init_x, init_v, init_volume, init_cov, eps=1e-6):
     E0.requires_grad_()
     E1.requires_grad_()
 
-    outputs0 = SimulationInterface.apply(E0, init_x, init_v, init_volume, init_cov)
-    outputs1 = SimulationInterface.apply(E1, init_x, init_v, init_volume, init_cov)
+    outputs0 = SimulationInterface.apply(E0, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone())
+    outputs1 = SimulationInterface.apply(E1, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone())
 
     print(f"outputs0: {type(outputs0)}, shape {outputs0.shape}")
 
     loss0 = torch.sum(outputs0)
-    print(f"loss0: {loss0} type {type(loss0)}, requires_grad {loss0.requires_grad}")
+    print(f"E0 {E0[0]}, loss0: {loss0} type {type(loss0)}, requires_grad {loss0.requires_grad}")
     loss1 = torch.sum(outputs1)
-    print(f"loss1: {loss1} type {type(loss1)}, requires_grad {loss1.requires_grad}")
-    pdb.set_trace()
+    print(f"E1 {E1[0]}, loss1: {loss1} type {type(loss1)}, requires_grad {loss1.requires_grad}")
 
+    print(f"Running loss backward ...")
     loss0.backward()
     loss1.backward()
 
     grad_finite_diff = (loss0 - loss1).item() / (2 * eps)
-    grad_autodiff = torch.sum(delta_E * (E0.grad + E1.grad)).item()
+    grad_autodiff = torch.sum(delta_E * (E0.grad + E1.grad)/2).item()
+
+    print(f"E0 grad: {E0.grad} \nE1 grad: {E1.grad}")
 
     grad_error = abs(grad_finite_diff - grad_autodiff)
 
@@ -248,7 +263,7 @@ if __name__ == "__main__":
 
     # 🔥 Create SAME `init_x` and `init_v` for all perturbations
     init_x = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
-    init_v = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
+    init_v = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True) * 5.0
     volume_array = get_volume(init_x.detach().cpu().numpy())
     init_volume = torch.tensor(volume_array, dtype=torch.float32, device=device, requires_grad=False)
     # initialize the covariance matrix with positive diagonal values
@@ -259,8 +274,8 @@ if __name__ == "__main__":
     E_tensor = torch.ones(n_particles, dtype=torch.float32, device=device, requires_grad=True) * initE
 
     # 🔥 Compute Autodiff and Finite Difference Gradient for E
-    grad_error = check_autodiff(E_tensor, init_x, init_v, init_volume, init_cov, eps=10)
+    grad_error = check_autodiff(E_tensor, init_x, init_v, init_volume, init_cov, eps=100)
 
     # 🔥 Compare error
-    assert grad_error < 1e-4, "Gradient check failed!"
+    assert grad_error < 1e-7, "Gradient check failed!"
     print("Gradient verification passed!")

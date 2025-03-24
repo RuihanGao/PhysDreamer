@@ -302,6 +302,17 @@ def compute_dweight(
     )
     return dweight * model.inv_dx
 
+# 2025-03-14
+@wp.func
+def compute_dweight_mat(
+    model: MPMModelStruct, w: wp.mat33, dw: wp.mat33, i: int, j: int, k: int
+):
+    return wp.mat33(
+        dw[0, i] * w[1, j] * w[2, k], dw[0, i] * dw[1, j] * w[2, k], dw[0, i] * w[1, j] * dw[2, k],
+        w[0, i] * dw[1, j] * w[2, k], w[0, i] * w[1, j] * dw[2, k], w[0, i] * w[1, j] * dw[2, k],
+        w[0, i] * w[1, j] * dw[2, k], w[0, i] * w[1, j] * dw[2, k], w[0, i] * w[1, j] * dw[2, k]
+    ) * model.inv_dx
+
 
 @wp.func
 def update_cov(state: MPMStateStruct, p: int, grad_v: wp.mat33, dt: float):
@@ -432,6 +443,55 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: float
                     wp.atomic_add(
                         state.grid_m, ix, iy, iz, weight * state.particle_mass[p]
                     )
+
+
+@wp.kernel
+def p2g_apic_with_stress_simplified(state: MPMStateStruct, model: MPMModelStruct, dt: float):
+    p = wp.tid()
+    if state.particle_selection[p] == 0:
+        stress = state.particle_stress[p]
+
+        # convert world-space position to grid-space
+        grid_pos = state.particle_x[p] * model.inv_dx
+        # find the base grid note (bottom left in 3D)
+        base_pos_x = wp.int(grid_pos[0] - 0.5)
+        base_pos_y = wp.int(grid_pos[1] - 0.5)
+        base_pos_z = wp.int(grid_pos[2] - 0.5)
+        # fractional offset of the particle within the grid cell
+        fx = grid_pos - wp.vec3(
+            wp.float(base_pos_x), wp.float(base_pos_y), wp.float(base_pos_z)
+        )
+
+        # basis function for tricubic interpolation
+        wa = wp.vec3(1.5) - fx
+        wb = fx - wp.vec3(1.0)
+        wc = fx - wp.vec3(0.5)
+        w = wp.mat33(
+            wp.cw_mul(wa, wa) * 0.5,
+            wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
+            wp.cw_mul(wc, wc) * 0.5,
+        )
+        # gradient of the weight functions
+        dw = wp.mat33(fx - wp.vec3(1.5), -2.0 * (fx - wp.vec3(1.0)), fx - wp.vec3(0.5))
+
+        # Loop over the 3x3x3 grid node neighborhood
+        for i in range(0, 3):
+            for j in range(0, 3):
+                for k in range(0, 3):
+                    
+                    ix = base_pos_x + i
+                    iy = base_pos_y + j
+                    iz = base_pos_z + k
+                    dweight = compute_dweight(model, w, dw, i, j, k)
+
+                    # print(dweight)
+
+                    elastic_force = -state.particle_vol[p] * stress * dweight
+                    # print(elastic_force)
+
+                    v_in_add = dt * elastic_force
+                    wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
+
 
 @wp.kernel
 def p2g_apply_impulse(time: float, dt: float, state: MPMStateStruct, model: MPMModelStruct, param: Impulse_modifier):
@@ -712,7 +772,6 @@ def compute_stress_from_F_trial(
             stress = kirchoff_stress_StVK(
                 state.particle_F[p], U, V, sig, model.mu[p], model.lam[p]
             )
-
         if model.material == 6:
             stress = kirchoff_stress_neoHookean(
                 state.particle_F[p], U, V, J, sig, model.mu[p], model.lam[p]
@@ -995,6 +1054,27 @@ def compute_posloss_with_grad(
     wp.atomic_add(loss, 0, l2)
 
 
+
+@wp.kernel
+def compute_stressloss_with_grad(
+    mpm_state: MPMStateStruct,
+    gt_stress: wp.array(dtype=wp.mat33),
+    grad: wp.array(dtype=wp.mat33),
+    dt: float,
+    loss: wp.array(dtype=float),
+):
+    tid = wp.tid()
+
+    stress = mpm_state.particle_stress[tid]
+    stress_gt = gt_stress[tid]
+
+    stress_diff = stress - (stress_gt - grad[tid] * dt)
+    l2 = wp.ddot(stress_diff, stress_diff)
+
+    wp.atomic_add(loss, 0, l2)
+
+
+
 @wp.kernel
 def compute_veloloss_with_grad(
     mpm_state: MPMStateStruct,
@@ -1047,6 +1127,78 @@ def compute_Floss_with_grad(
     # )
 
     wp.atomic_add(loss, 0, l2)
+
+
+### 2025-03-13 Create loss kernel for unit test ###
+@wp.kernel
+def compute_stress_loss_with_grad(
+    mpm_state: MPMStateStruct,  # Current MPM state
+    grad_stress_wp: wp.array(dtype=wp.mat33),  # Incoming gradient from loss w.r.t. stress
+    scale: float,  # Scaling factor (default 1.0)
+    loss: wp.array(dtype=float)  # Output loss value (scalar)
+):
+    """
+    Compute loss gradient w.r.t. stress and accumulate it in the Warp computation graph.
+    """
+
+    tid = wp.tid()  # Thread index for particles
+
+    # Fetch the current stress tensor
+    stress_tensor = mpm_state.particle_stress[tid]
+
+    # Compute dot product between stress and its gradient
+    stress_loss = wp.ddot(stress_tensor, grad_stress_wp[tid]) * scale
+
+    # Accumulate loss contribution
+    wp.atomic_add(loss, 0, stress_loss)
+
+
+
+@wp.kernel
+def compute_grid_vin_loss_with_grad(
+    mpm_state: MPMStateStruct,  
+    grad_grid_v_wp: wp.array3d(dtype=wp.vec3),  
+    scale: float,  
+    loss: wp.array(dtype=float)  
+):
+    """
+    Compute how grid velocity `grid_v_in` contributes to the loss gradient.
+    """
+
+    i, j, k = wp.tid()  # Thread index for grid
+
+    # Fetch the current grid velocity
+    grid_v_tensor = mpm_state.grid_v_in[i, j, k]
+
+    # Compute how grid velocity affects loss
+    grid_v_loss = wp.dot(grid_v_tensor, grad_grid_v_wp[i, j, k]) * scale
+
+    # Accumulate the loss gradient contribution
+    wp.atomic_add(loss, 0, grid_v_loss)
+
+
+
+# create another kernel just to sum up all elememts. check if that matches with loss computation with gradient
+@wp.kernel
+def sum_grid_vin(
+    mpm_state: MPMStateStruct,
+    loss: wp.array(dtype=wp.float32)  
+):
+    """
+    Compute how grid velocity `grid_v_in` contributes to the loss gradient.
+    """
+
+    i, j, k = wp.tid()  # Thread index for grid
+
+    # Fetch the current grid velocity
+    grid_v_tensor = mpm_state.grid_v_in[i, j, k]
+
+    # Accumulate the loss gradient contribution
+    wp.atomic_add(loss, 0, grid_v_tensor[0])
+    wp.atomic_add(loss, 0, grid_v_tensor[1])
+    wp.atomic_add(loss, 0, grid_v_tensor[2])
+
+
 
 
 @wp.kernel
