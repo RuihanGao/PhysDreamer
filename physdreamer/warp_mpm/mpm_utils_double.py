@@ -430,6 +430,7 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: wp.fl
                         # standard pic
                         C = wp.mat33d(wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0))
 
+                    # print(dweight)
                     elastic_force = -state.particle_vol[p] * stress * dweight
                     v_in_add = (
                         weight
@@ -1185,7 +1186,7 @@ def compute_grid_vin_loss_with_grad(
 @wp.kernel
 def sum_grid_vin(
     mpm_state: MPMStateStruct,
-    loss: wp.array(dtype=wp.float64)  
+    loss: wp.array(dtype=wp.float64),
 ):
     """
     Compute how grid velocity `grid_v_in` contributes to the loss gradient.
@@ -1200,6 +1201,9 @@ def sum_grid_vin(
     wp.atomic_add(loss, 0, grid_v_tensor[0])
     wp.atomic_add(loss, 0, grid_v_tensor[1])
     wp.atomic_add(loss, 0, grid_v_tensor[2])
+
+
+
 
 
 @wp.kernel

@@ -263,6 +263,9 @@ if __name__ == "__main__":
     # 🔥 Create SAME `init_x` and `init_v` for all perturbations
     init_x = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
     init_v = torch.rand((n_particles, 3), dtype=torch.float32, device=device, requires_grad=True)
+    # shift the mean of init_v
+    init_v = init_v + 1.0
+    print(f"check init_v: mean {torch.mean(init_v)}, std {torch.std(init_v)}")
     volume_array = get_volume(init_x.detach().cpu().numpy())
     init_volume = torch.tensor(volume_array, dtype=torch.float32, device=device, requires_grad=False)
     # initialize the covariance matrix with positive diagonal values

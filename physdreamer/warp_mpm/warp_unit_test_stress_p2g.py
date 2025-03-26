@@ -105,9 +105,6 @@ class SimulationInterface(autograd.Function):
         # pdb.set_trace()
 
 
-        # print("Before p2g_apic_with_stress_simplified:")
-        # print(mpm_state.grid_v_in.numpy())
-
         with cond_tape:
             wp.launch(
                 kernel=zero_grid,  # gradient might gone
@@ -117,16 +114,11 @@ class SimulationInterface(autograd.Function):
             )
 
             wp.launch(
-                kernel=p2g_apic_with_stress_simplified,
+                kernel=p2g_apic_with_stress,
                 dim=n_particles,
                 inputs=[mpm_state, mpm_model, dt],
                 device=device,
             )
-
-
-
-        print("After p2g_apic_with_stress_simplified:")
-        print(mpm_state.grid_v_in.numpy())
 
 
         ctx.tape = wp_tape

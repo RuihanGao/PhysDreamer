@@ -28,21 +28,24 @@ today = datetime.today().strftime('%Y%m%d')
 log_dir = f"logs/{today}"
 os.makedirs(log_dir, exist_ok=True)
 
+loss_scaling = 1e7
 
-@wp.kernel
-def compute_loss_kernel_vec3(particle_x: wp.array(dtype=wp.vec3), loss: wp.array(dtype=64)):
-    tid = wp.tid()
-    wp.atomic_add(loss, 0, particle_x[tid][0] + particle_x[tid][1] + particle_x[tid][2])
 
-# create a loss kernel that sums up the stress tensor (N, 3, 3) shape
+# define a warp kernel to scale up the loss
 @wp.kernel
-def compute_loss_kernel_mat33(particle_stress: wp.array(dtype=wp.mat33), loss: wp.array(dtype=float)):
-    tid = wp.tid()
-    wp.atomic_add(loss, 0, particle_stress[tid][0][0] + particle_stress[tid][1][1] + particle_stress[tid][2][2])
+def scale_up_loss(
+    loss: wp.array(dtype=wp.float64),
+    scale: wp.float64
+):
+    """
+    Scale up the loss by a factor `scale`.
+    """
+    i = wp.tid()
+    loss[i] = wp.mul(loss[i], scale)
 
 class SimulationInterface(autograd.Function):
     @staticmethod
-    def forward(ctx, particle_stress, init_x, init_v, init_volume, init_cov):
+    def forward(ctx, particle_stress, init_x, init_v, init_volume, init_cov, requires_grad=True):
         """
         Forward simulation using the same init_x and init_v.
         """
@@ -52,12 +55,12 @@ class SimulationInterface(autograd.Function):
 
         # Reinitialize MPM state, model, solver
         mpm_state = MPMStateStruct()
-        mpm_state.init(n_particles, device=device, requires_grad=True)
-        print(f"Initializing mpm_state")
+        mpm_state.init(n_particles, device=device, requires_grad=requires_grad)
+        # print(f"Initializing mpm_state")
         
         mpm_model = MPMModelStruct()
-        mpm_model.init(n_particles, device=device, requires_grad=True)
-        print(f"Initializing mpm_model")
+        mpm_model.init(n_particles, device=device, requires_grad=requires_grad)
+        # print(f"Initializing mpm_model")
 
         mpm_state.from_torch(
             init_x,
@@ -65,13 +68,12 @@ class SimulationInterface(autograd.Function):
             init_cov,
             init_v,
             device=device,
-            requires_grad=True,
+            requires_grad=requires_grad,
             n_grid=n_grid,
             grid_lim=grid_lim,
         )        
         mpm_model.init_other_params(n_grid=n_grid, grid_lim=grid_lim, device=device)
-
-        print(f"Initializing mpm_state and mpm_model params")
+        # print(f"Initializing mpm_state and mpm_model params")
 
         grid_size = (
             mpm_model.grid_dim_x,
@@ -92,25 +94,15 @@ class SimulationInterface(autograd.Function):
         mpm_state.reset_density(density_tensor.clone(), device=device, update_mass=True)
 
         # Set perturbed particle_stress
-        mpm_state.particle_stress = from_torch_safe(particle_stress, dtype=wp.mat33d, requires_grad=True)
+        if requires_grad:
+            particle_stress.retain_grad()
+        mpm_state.particle_stress = from_torch_safe(particle_stress, dtype=wp.mat33d, requires_grad=requires_grad)
+
+
 
         # Run only `p2g_apic_with_stress`
         wp_tape = MyTape()
         cond_tape: CondTape = CondTape(wp_tape, True)
-
-
-        # print(f"Before running p2g_apic_with_stress")
-        # print(f"check particle_C")
-        # print(mpm_state.particle_C.numpy()) # all zeros
-        print(f"check particle_vol, shape {mpm_state.particle_vol.numpy().shape}")
-        # print(mpm_state.particle_vol.numpy())
-        # print(f"check rpic_damping")
-        # print(mpm_model.rpic_damping)
-        # pdb.set_trace()
-
-
-        # print("Before p2g_apic_with_stress_simplified:")
-        # print(mpm_state.grid_v_in.numpy())
 
         with cond_tape:
             wp.launch(
@@ -121,14 +113,15 @@ class SimulationInterface(autograd.Function):
             )
 
             wp.launch(
-                kernel=p2g_apic_with_stress_simplified,
+                kernel=p2g_apic_with_stress,
                 dim=n_particles,
                 inputs=[mpm_state, mpm_model, dt],
                 device=device,
             )
-
-        # print("After p2g_apic_with_stress_simplified:")
-        # print(mpm_state.grid_v_in.numpy())
+        
+        
+        # print(f"check dweight")
+        # pdb.set_trace()
 
         ctx.tape = wp_tape
         ctx.mpm_state = mpm_state
@@ -152,28 +145,34 @@ class SimulationInterface(autograd.Function):
         out_grid_vin_grad = out_grid_vin_grad.contiguous() # derivative of loss func w.r.t. output grid_v_in, should be all ones. shape [4, 4, 4, 3], dtype float32
         grad_vin_wp = from_torch_safe(out_grid_vin_grad.to(torch.float64), dtype=wp.vec3d, requires_grad=False)
 
-        loss_wp = wp.zeros(1, dtype=wp.float64, device=device, requires_grad=True)
 
         grid_size = (mpm_model.grid_dim_x, mpm_model.grid_dim_y, mpm_model.grid_dim_z)
 
         with tape:
+
+            wp.launch(
+                compute_grid_vin_loss_with_grad,
+                dim=grid_size,
+                inputs=[mpm_state, grad_vin_wp, 1.0, loss_wp],
+                device=device,
+            )
+
+            # # Manually compute the sum of grid_v_in for debugging. Equivalent to the above kernel "compute_grid_vin_loss_with_grad"
             # wp.launch(
-            #     compute_grid_vin_loss_with_grad,
+            #     sum_grid_vin,
             #     dim=grid_size,
-            #     inputs=[mpm_state, grad_vin_wp, 1.0, loss_wp],
+            #     inputs=[mpm_state, loss_wp],
             #     device=device,
             # )
 
-            # save the grid_v_in for debugging
-            grid_v_in_wp = mpm_state.grid_v_in
-            np.savez(osp.join(log_dir, "grid_v_in_wp.npz"), grid_v_in=grid_v_in_wp.numpy())
 
-            wp.launch(
-                sum_grid_vin,
-                dim=grid_size,
-                inputs=[mpm_state, loss_wp],
-                device=device,
-            )
+            # NOTE: We don't need run "scale_up_loss" kernel since we use "loss0 = loss0 * loss_scaling" to scale up the loss
+            # wp.launch(
+            #     scale_up_loss,
+            #     dim=1,
+            #     inputs=[loss_wp, loss_scaling],
+            #     device=device,
+            # )
 
         tape.backward(loss_wp)
         print(f"loss_wp: {loss_wp}")
@@ -181,64 +180,70 @@ class SimulationInterface(autograd.Function):
         stress_grad_wp = mpm_state.particle_stress.grad
         stress_grad_torch = wp.to_torch(stress_grad_wp).detach().clone()
 
-        return stress_grad_torch, None, None, None, None  # No gradients for init_x, init_v, init_volume, init_cov
+        return stress_grad_torch, None, None, None, None, None  # No gradients for init_x, init_v, init_volume, init_cov
 
 
-def check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov, eps=1e-6):
+
+
+def check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov, relative_eps=1e-6):
     """
     Check gradient using finite differences by perturbing `particle_stress`.
     """
-    # delta_stress = torch.rand_like(particle_stress)
-    # # save delta_stress for debugging
-    # np.savez("delta_stress.npz", delta_stress=delta_stress.cpu().numpy())
-    n_particles = particle_stress.shape[0]
-    delta_stress = np.load("delta_stress.npz")["delta_stress"][:n_particles]
-    delta_stress = torch.tensor(delta_stress, dtype=torch.float64, device=device, requires_grad=False)
-    delta_stress /= torch.sqrt(torch.sum(delta_stress ** 2))  # Normalize perturbation
 
-    stress0 = particle_stress.detach().clone() + eps * delta_stress
-    stress1 = particle_stress.detach().clone() - eps * delta_stress
-
-    stress0.requires_grad_()
-    stress1.requires_grad_()
-    print(f"check stress0: shape {stress0.shape}, min {stress0.min()}, max {stress0.max()}")
-    print(f"check stress1: shape {stress1.shape}, min {stress1.min()}, max {stress1.max()}")
-
-    print(f"check dtype: stress0 {stress0.dtype}, init_x {init_x.dtype}, init_v {init_v.dtype}, init_volume {init_volume.dtype}, init_cov {init_cov.dtype}")
-    outputs0 = SimulationInterface.apply(stress0, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone())
-    print(f"outputs0: {type(outputs0)}, shape {outputs0.shape}")
-
-    np.savez(osp.join(log_dir, "grid_v_in_torch.npz"), grid_v_in=outputs0.detach().cpu().numpy())
-
-    outputs1 = SimulationInterface.apply(stress1, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone())
-    print(f"outputs1: {type(outputs1)}, shape {outputs1.shape}")
-
-    loss0 = torch.sum(outputs0.to(torch.float64))
-    print(f"loss0: {loss0}, requires_grad {loss0.requires_grad}, numpy sum {np.sum(outputs0.detach().cpu().numpy().astype(np.float64))}")
-    loss1 = torch.sum(outputs1.to(torch.float64))
-    print(f"loss1: {loss1}, requires_grad {loss1.requires_grad}, numpy sum {np.sum(outputs1.detach().cpu().numpy().astype(np.float64))}")
-
-    # save outputs for debugging
-    np.savez(osp.join(log_dir, "example_output_test_stress_p2g.npz"), outputs0=outputs0.detach().cpu().numpy(), outputs1=outputs1.detach().cpu().numpy())
-
-    print(f"Running loss backward ...")
-    loss0.backward()
+    print(f"check particle_stress")
+    print(particle_stress)
     pdb.set_trace()
-    loss1.backward()
 
-    grad_finite_diff = (loss0 - loss1).item() / (2 * eps)
-    grad_autodiff = torch.sum(delta_stress * (stress0.grad + stress1.grad) / 2).item()
+    # Compute finite difference gradient
+    for relative_eps in [1e-5, 1e-6, 1e-7]:
+        print(f"relative_eps: {relative_eps}")
+        particle_stress_fd = particle_stress.clone().detach().requires_grad_(False)  # No gradient needed for finite diff
+        grad_finite_diff = torch.zeros_like(particle_stress_fd)
+        # print(f"check grad_finite_diff: {grad_finite_diff.shape}")
 
-    print(f"finite_diff: {grad_finite_diff}")
-    print(f"analytical: {grad_autodiff}")
+        N, H, W = particle_stress_fd.shape
+        
+        for n in range(N):
+            for i in range(H):
+                for j in range(W):
+                    E = torch.zeros_like(particle_stress_fd)
+                    perturbation = relative_eps * max(abs(particle_stress_fd[n, i, j]), 1.0) # perturb with relative eps
+                    print(f"n {n} i {i} j {j} perturbation {perturbation}")
+                    E[n, i, j] = perturbation 
 
-    grad_error = abs(grad_finite_diff - grad_autodiff)
-    print(f"grad_error: {grad_error}")
+                    outputs_plus = SimulationInterface.apply(particle_stress_fd + E, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), False)
+                    loss_plus = torch.sum(outputs_plus.to(torch.float64)) * loss_scaling
+                    outputs_minus = SimulationInterface.apply(particle_stress_fd - E, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), False)
+                    loss_minus = torch.sum(outputs_minus.to(torch.float64)) * loss_scaling
+                    # print(f"n {n} i {i} j {j} loss_plus {loss_plus} loss_minus {loss_minus}")
 
-    print(f"stress0 grad: {torch.sum(delta_stress * stress0.grad).item()}")
-    print(f"stress1 grad: {torch.sum(delta_stress * stress1.grad).item()}")
-    print(stress0.grad)
-    print(stress1.grad)
+                    grad_finite_diff[n, i, j] = (loss_plus - loss_minus) / (2 * perturbation)
+        print(f"relative_eps: {relative_eps} finite_diff: \n{grad_finite_diff}")
+        pdb.set_trace()
+
+
+    # Compute auto-diff gradient
+    particle_stress.requires_grad_()
+    outputs_autodiff = SimulationInterface.apply(particle_stress, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), True)
+    loss_autodiff = torch.sum(outputs_autodiff.to(torch.float64))
+    loss_autodiff = loss_autodiff * loss_scaling
+
+    print(f"Running loss backward for auto-diff ...")
+    loss_autodiff.backward()
+    grad_autodiff = particle_stress.grad
+
+    # Compare the results
+    # print(f"finite_diff: {grad_finite_diff}")
+    print(f"analytical: \n{grad_autodiff}")
+
+    for n in range(N):
+        for i in range(H):
+            for j in range(W):
+                print(f"n {n} i {i} j {j}, grad_autodiff {grad_autodiff[n, i, j]}, pred_fd {}")
+
+    # # compute the error
+    # grad_error = torch.norm(grad_finite_diff - grad_autodiff) / torch.norm(grad_finite_diff + grad_autodiff)
+    # print(f"grad_error: {grad_error}")
 
     return grad_error
 
@@ -267,17 +272,16 @@ if __name__ == "__main__":
     input_data = np.load(input_file_path)
     init_x = torch.tensor(input_data["init_x"][:n_particles], dtype=torch.float64, device=device, requires_grad=True)
     init_v = torch.tensor(input_data["init_v"][:n_particles], dtype=torch.float64, device=device, requires_grad=True)
-    init_volume = torch.tensor(input_data["init_volume"][:n_particles], dtype=torch.float64, device=device, requires_grad=False)
-    init_cov = torch.tensor(input_data["init_cov"][:n_particles], dtype=torch.float64, device=device, requires_grad=False)
+    init_volume = torch.tensor(input_data["init_volume"][:n_particles], dtype=torch.float64, device=device, requires_grad=False) * 1e6 # 20250325 scale up the volume to get larger gradient for stress
+    init_cov = torch.tensor(input_data["init_cov"][:n_particles], dtype=torch.float64, device=device, requires_grad=False) 
     particle_stress = torch.tensor(input_data["outputs0"][:n_particles], dtype=torch.float64, device=device, requires_grad=True)*1e10
+
 
     print(f"check initial particle_stress: shape {particle_stress.shape}, min {particle_stress.min()}, max {particle_stress.max()}")
 
     # Compute Autodiff and Finite Difference Gradient for particle_stress
     for relative_eps in [1e-6]: # [1e-5, 1e-6, 1e-7]
-        eps = relative_eps * torch.norm(particle_stress).item()
-        print(f"check eps: {eps}")
-        grad_error = check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov, eps=eps)
+        grad_error = check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov, relative_eps=relative_eps)
 
     # Compare error
     assert grad_error < 1e-7, "Gradient check failed!"

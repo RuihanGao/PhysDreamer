@@ -171,7 +171,7 @@ class MPMStateStruct(object):
             device=device,
         )
         # initial trial deformation gradient is set to identity
-        print("Particles initialized from torch data. Total particles: ", n_particles)
+        # print("Particles initialized from torch data. Total particles: ", n_particles)
 
     def reset_state(
         self,
