@@ -1203,6 +1203,15 @@ def sum_grid_vin(
     wp.atomic_add(loss, 0, grid_v_tensor[2])
 
 
+@wp.kernel
+def sum_grid_vin_l2(
+    mpm_state: MPMStateStruct,
+    loss: wp.array(dtype=wp.float64),
+):
+    i, j, k = wp.tid()
+    grid_v_tensor = mpm_state.grid_v_in[i, j, k]
+    l2 = wp.dot(grid_v_tensor, grid_v_tensor)
+    wp.atomic_add(loss, 0, l2)
 
 
 
