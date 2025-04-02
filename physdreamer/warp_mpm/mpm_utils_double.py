@@ -438,6 +438,10 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: wp.fl
                         * (state.particle_v[p] + C * dpos)
                         + dt * elastic_force
                     )
+                    if p == 0:
+                        print(ix)
+                        print(iy)
+                        print(iz)
                     wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
                     wp.atomic_add(
                         state.grid_m, ix, iy, iz, weight * state.particle_mass[p]
@@ -445,7 +449,11 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: wp.fl
 
 
 @wp.kernel
-def p2g_apic_with_stress_simplified(state: MPMStateStruct, model: MPMModelStruct, dt: wp.float64):
+def p2g_apic_with_stress_debug(state: MPMStateStruct, model: MPMModelStruct, dt: wp.float64, grid_counter: wp.array(dtype=wp.int32, ndim=3)):
+    """
+    Similar to p2g_apic_with_stress, but adding grid_counter for debugging the overlapping support of grid nodes.
+
+    """
     p = wp.tid()
     if state.particle_selection[p] == 0:
         stress = state.particle_stress[p]
@@ -478,18 +486,47 @@ def p2g_apic_with_stress_simplified(state: MPMStateStruct, model: MPMModelStruct
             for j in range(0, 3):
                 for k in range(0, 3):
                     
+                    dpos = (
+                        wp.vec3d(wp.float64(i), wp.float64(j), wp.float64(k)) - fx
+                    ) * model.dx
                     ix = base_pos_x + i
                     iy = base_pos_y + j
                     iz = base_pos_z + k
+                    weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
+                    # if weight < 0:
+                    #     print(weight)
                     dweight = compute_dweight(model, w, dw, i, j, k)
 
-                    # print(dweight)
+                    C = state.particle_C[p]
+                    # if model.rpic = 0, standard apic
+                    C = (wp.float64(1.0) - model.rpic_damping) * C + model.rpic_damping / wp.float64(2.0) * (
+                        C - wp.transpose(C)
+                    )
 
+                    # C = (wp.float64(1.0) - model.rpic_damping) * state.particle_C[
+                    #     p
+                    # ] + model.rpic_damping / wp.float64(2.0) * (
+                    #     state.particle_C[p] - wp.transpose(state.particle_C[p])
+                    # )
+
+                    if model.rpic_damping < -0.001:
+                        # standard pic
+                        C = wp.mat33d(wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0))
+
+                    # print(dweight) # TODO: double check sum should be 1
                     elastic_force = -state.particle_vol[p] * stress * dweight
-                    # print(elastic_force)
+                    v_in_add = (
+                        weight
+                        * state.particle_mass[p]
+                        * (state.particle_v[p] + C * dpos)
+                        + dt * elastic_force
+                    )
+                    wp.atomic_add(grid_counter, ix, iy, iz, 1)
 
-                    v_in_add = dt * elastic_force
                     wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
+                    wp.atomic_add(
+                        state.grid_m, ix, iy, iz, weight * state.particle_mass[p]
+                    )
 
 
 @wp.kernel

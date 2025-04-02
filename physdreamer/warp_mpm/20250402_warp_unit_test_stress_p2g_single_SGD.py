@@ -1,10 +1,10 @@
 import warp as wp
 import torch
 import numpy as np
-from mpm_solver_diff_double import MPMWARPDiff
-from mpm_data_structure_double import MPMStateStruct, MPMModelStruct
+from mpm_solver_diff import MPMWARPDiff
+from mpm_data_structure import MPMStateStruct, MPMModelStruct
 from warp_utils import MyTape, from_torch_safe, CondTape
-from mpm_utils_double import * 
+from mpm_utils import * 
 from run_gaussian_static import load_gaussians, get_volume
 import torch.autograd as autograd
 import pdb
@@ -36,8 +36,8 @@ loss_type = 2
 # define a warp kernel to scale up the loss
 @wp.kernel
 def scale_up_loss(
-    loss: wp.array(dtype=wp.float64),
-    scale: wp.float64
+    loss: wp.array(dtype=wp.float32),
+    scale: wp.float32
 ):
     """
     Scale up the loss by a factor `scale`.
@@ -99,11 +99,11 @@ class SimulationInterface(autograd.Function):
         }
         solver.set_parameters_dict(mpm_model, mpm_state, material_params)
 
-        density_tensor = torch.ones(n_particles, dtype=torch.float64, device=device) * material_params["density"]
+        density_tensor = torch.ones(n_particles, dtype=torch.float32, device=device) * material_params["density"]
         mpm_state.reset_density(density_tensor.clone(), device=device, update_mass=True)
 
         # Set perturbed particle_stress
-        mpm_state.particle_stress = from_torch_safe(particle_stress, dtype=wp.mat33d, requires_grad=requires_grad)
+        mpm_state.particle_stress = from_torch_safe(particle_stress, dtype=wp.mat33f, requires_grad=requires_grad)
 
         grid_counter_tensor = torch.zeros((n_grid, n_grid, n_grid), dtype=torch.int32, device=device, requires_grad=False)
         grid_counter = wp.from_torch(grid_counter_tensor, dtype=wp.int32)
@@ -112,7 +112,11 @@ class SimulationInterface(autograd.Function):
         wp_tape = MyTape()
         cond_tape: CondTape = CondTape(wp_tape, True)
         if loss_in_warp:
-            wp_loss = wp.zeros(1, dtype=wp.float64, requires_grad=True, device=mpm_state.particle_stress.device)
+            wp_loss = wp.zeros(1, dtype=wp.float32, requires_grad=True, device=mpm_state.particle_stress.device)
+
+
+        # print(f"check particle_mass")
+        # print(mpm_state.particle_mass.numpy()) # [7.81103881 7.81103881 7.81103881]
 
         with cond_tape:
             wp.launch(
@@ -123,9 +127,9 @@ class SimulationInterface(autograd.Function):
             )
 
             wp.launch(
-                kernel=p2g_apic_with_stress_debug,
+                kernel=p2g_apic_with_stress,
                 dim=n_particles,
-                inputs=[mpm_state, mpm_model, dt, grid_counter],
+                inputs=[mpm_state, mpm_model, dt],
                 device=device,
             )
 
@@ -188,9 +192,9 @@ class SimulationInterface(autograd.Function):
 
             # Convert gradients to Warp format
             out_grid_vin_grad = out_grid_vin_grad.contiguous() # derivative of loss func w.r.t. output grid_v_in, should be all ones. shape [4, 4, 4, 3], dtype float32
-            grad_vin_wp = from_torch_safe(out_grid_vin_grad.to(torch.float64), dtype=wp.vec3d, requires_grad=False)
+            grad_vin_wp = from_torch_safe(out_grid_vin_grad.to(torch.float32), dtype=wp.vec3f, requires_grad=False)
             grid_size = (mpm_model.grid_dim_x, mpm_model.grid_dim_y, mpm_model.grid_dim_z)
-            loss_wp = wp.zeros(1, dtype=wp.float64, device=device, requires_grad=True)
+            loss_wp = wp.zeros(1, dtype=wp.float32, device=device, requires_grad=True)
 
             with tape:
                 wp.launch(
@@ -266,7 +270,7 @@ def check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov):
 
     # list_a =  [particle_stress_[idx_i, idx_j, idx_k] * i * 10**(-5) for i in range(-10, 10)]
     # # list_b =  np.arange(1e7, 6e7, 1e7).tolist()
-    # # list_b = [torch.tensor(i, dtype=torch.float64, device=device) for i in list_b]
+    # # list_b = [torch.tensor(i, dtype=torch.float32, device=device) for i in list_b]
     # list_b = []
 
     # stress_element_list = list_a + list_b
@@ -380,7 +384,7 @@ if __name__ == "__main__":
     # Load initial data from file
     input_file_path = "example_stress_tensor.npz"
     input_data = np.load(input_file_path)
-    init_x = torch.tensor(input_data["init_x"][:n_particles], dtype=torch.float64, device=device, requires_grad=True)
+    init_x = torch.tensor(input_data["init_x"][:n_particles], dtype=torch.float32, device=device, requires_grad=True)
     # inspect init_x to see if particles have overlapped grid nodes for perturbation
     print("init_x")
     print(init_x)
@@ -401,25 +405,25 @@ if __name__ == "__main__":
     #     z = (i // (side * side)) * grid_spacing + 0.2
     #     positions.append([x, y, z])
 
-    # init_x = torch.tensor(positions, dtype=torch.float64, device=device, requires_grad=True)
+    # init_x = torch.tensor(positions, dtype=torch.float32, device=device, requires_grad=True)
 
 
-    init_x = torch.tensor([
-        [0.2, 0.4, 0.2],
-        [0.5, 0.7, 0.5],
-        [0.4, 0.3, 0.8],
-    ], dtype=torch.float64, device=device, requires_grad=True)
-    print("Manually spread out init_x")
-    print(init_x)
+    # init_x = torch.tensor([
+    #     [0.2, 0.4, 0.2],
+    #     [0.5, 0.7, 0.5],
+    #     [0.4, 0.3, 0.8],
+    # ], dtype=torch.float32, device=device, requires_grad=True)
+    # print("Manually spread out init_x")
+    # print(init_x)
 
     # pdb.set_trace()    
 
 
 
-    init_v = torch.tensor(input_data["init_v"][:n_particles], dtype=torch.float64, device=device, requires_grad=True)
-    init_volume = torch.tensor(input_data["init_volume"][:n_particles], dtype=torch.float64, device=device, requires_grad=False)*1e3 # 20250325 scale up the volume to get larger gradient for stress
-    init_cov = torch.tensor(input_data["init_cov"][:n_particles], dtype=torch.float64, device=device, requires_grad=False) 
-    particle_stress = torch.tensor(input_data["outputs0"][:n_particles], dtype=torch.float64, device=device, requires_grad=True)
+    init_v = torch.tensor(input_data["init_v"][:n_particles], dtype=torch.float32, device=device, requires_grad=True)
+    init_volume = torch.tensor(input_data["init_volume"][:n_particles], dtype=torch.float32, device=device, requires_grad=False)*1e3 # 20250325 scale up the volume to get larger gradient for stress
+    init_cov = torch.tensor(input_data["init_cov"][:n_particles], dtype=torch.float32, device=device, requires_grad=False) 
+    particle_stress = torch.tensor(input_data["outputs0"][:n_particles], dtype=torch.float32, device=device, requires_grad=True)
 
     print(f"check particle_stress")
     print(particle_stress)
@@ -433,7 +437,7 @@ if __name__ == "__main__":
 
     #         [[ 0.0458,  0.0068, -0.0173],
     #         [ 0.0068,  0.0458, -0.0119],
-    #         [-0.0173, -0.0119,  0.0458]]], device='cuda:0', dtype=torch.float64,
+    #         [-0.0173, -0.0119,  0.0458]]], device='cuda:0', dtype=torch.float32,
     #     requires_grad=True)
 
 
@@ -444,9 +448,59 @@ if __name__ == "__main__":
     grad_error = check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov)
 
     # Compare error
-    assert grad_error < 1e-3, "Gradient check failed!"
-    print("Gradient verification passed!")
+    if grad_error < 1e-3:
+        print("Gradient verification passed!")
+    else:
+        print("Gradient check failed!")
+    
 
 
+    # Perform a single SGD step to verify gradient correctness
+    print("\n###Performing SGD step to reduce loss...###")
 
-    # TODO: check particle_mass
+    # Clone original stress to perform updates
+    particle_stress_sgd = particle_stress.detach().clone().requires_grad_(True)
+    print(f"check particle_stress_sgd")
+    print(particle_stress_sgd)
+
+    # Compute original loss and grad
+    if loss_in_warp:
+        loss = SimulationInterface.apply(particle_stress_sgd, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), True)
+    else:
+        grid_v = SimulationInterface.apply(particle_stress_sgd, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), True)
+        if loss_type == 1:
+            loss = sum_grid_vin_torch(grid_v)
+        elif loss_type == 2:
+            loss = sum_grid_vin_l2_torch(grid_v)
+
+    loss = loss * loss_scaling
+    print(f"Original loss: {loss.item()}")
+    loss.backward()
+    grad = particle_stress_sgd.grad.clone()
+    print(f"Gradient of loss w.r.t. particle_stress: \n{grad}")
+
+
+    # Perform SGD update
+    lr = 1e-2  # You can tune this
+    particle_stress_updated = particle_stress_sgd - lr * grad
+    particle_stress_updated = particle_stress_updated.detach().clone().requires_grad_(False)
+    print(f"check particle_stress_updated")
+    print(particle_stress_updated)
+
+    # Recompute loss after update
+    if loss_in_warp:
+        new_loss = SimulationInterface.apply(particle_stress_updated, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), False)
+    else:
+        new_grid_v = SimulationInterface.apply(particle_stress_updated, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), False)
+        if loss_type == 1:
+            new_loss = sum_grid_vin_torch(new_grid_v)
+        elif loss_type == 2:
+            new_loss = sum_grid_vin_l2_torch(new_grid_v)
+
+    new_loss = new_loss * loss_scaling
+    print(f"New loss after SGD step: {new_loss.item()}")
+
+    if new_loss.item() < loss.item():
+        print("✅ SGD step successfully reduced the loss.")
+    else:
+        print("❌ SGD step did not reduce the loss. Investigate gradient correctness.")

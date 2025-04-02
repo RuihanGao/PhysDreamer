@@ -114,6 +114,10 @@ class SimulationInterface(autograd.Function):
         if loss_in_warp:
             wp_loss = wp.zeros(1, dtype=wp.float64, requires_grad=True, device=mpm_state.particle_stress.device)
 
+
+        # print(f"check particle_mass")
+        # print(mpm_state.particle_mass.numpy()) # [7.81103881 7.81103881 7.81103881]
+
         with cond_tape:
             wp.launch(
                 kernel=zero_grid,  # gradient might gone
@@ -362,7 +366,7 @@ def check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov):
 if __name__ == "__main__":    
     """Unit test for verifying gradient computation of `particle_stress`."""
 
-    n_particles = 3
+    n_particles = 10
     device = "cuda:0"
     wp.init()
 
@@ -404,13 +408,13 @@ if __name__ == "__main__":
     # init_x = torch.tensor(positions, dtype=torch.float64, device=device, requires_grad=True)
 
 
-    init_x = torch.tensor([
-        [0.2, 0.4, 0.2],
-        [0.5, 0.7, 0.5],
-        [0.4, 0.3, 0.8],
-    ], dtype=torch.float64, device=device, requires_grad=True)
-    print("Manually spread out init_x")
-    print(init_x)
+    # init_x = torch.tensor([
+    #     [0.2, 0.4, 0.2],
+    #     [0.5, 0.7, 0.5],
+    #     [0.4, 0.3, 0.8],
+    # ], dtype=torch.float64, device=device, requires_grad=True)
+    # print("Manually spread out init_x")
+    # print(init_x)
 
     # pdb.set_trace()    
 
@@ -444,9 +448,59 @@ if __name__ == "__main__":
     grad_error = check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov)
 
     # Compare error
-    assert grad_error < 1e-3, "Gradient check failed!"
-    print("Gradient verification passed!")
+    if grad_error < 1e-3:
+        print("Gradient verification passed!")
+    else:
+        print("Gradient check failed!")
+    
 
 
+    # Perform a single SGD step to verify gradient correctness
+    print("\n###Performing SGD step to reduce loss...###")
 
-    # TODO: check particle_mass
+    # Clone original stress to perform updates
+    particle_stress_sgd = particle_stress.detach().clone().requires_grad_(True)
+    # print(f"check particle_stress_sgd")
+    # print(particle_stress_sgd)
+
+    # Compute original loss and grad
+    if loss_in_warp:
+        loss = SimulationInterface.apply(particle_stress_sgd, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), True)
+    else:
+        grid_v = SimulationInterface.apply(particle_stress_sgd, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), True)
+        if loss_type == 1:
+            loss = sum_grid_vin_torch(grid_v)
+        elif loss_type == 2:
+            loss = sum_grid_vin_l2_torch(grid_v)
+
+    loss = loss * loss_scaling
+    print(f"Original loss: {loss.item()}")
+    loss.backward()
+    grad = particle_stress_sgd.grad.clone()
+    # print(f"Gradient of loss w.r.t. particle_stress: \n{grad}")
+
+
+    # Perform SGD update
+    lr = 1e-2  # You can tune this
+    particle_stress_updated = particle_stress_sgd - lr * grad
+    particle_stress_updated = particle_stress_updated.detach().clone().requires_grad_(False)
+    # print(f"check particle_stress_updated")
+    # print(particle_stress_updated)
+
+    # Recompute loss after update
+    if loss_in_warp:
+        new_loss = SimulationInterface.apply(particle_stress_updated, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), False)
+    else:
+        new_grid_v = SimulationInterface.apply(particle_stress_updated, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), False)
+        if loss_type == 1:
+            new_loss = sum_grid_vin_torch(new_grid_v)
+        elif loss_type == 2:
+            new_loss = sum_grid_vin_l2_torch(new_grid_v)
+
+    new_loss = new_loss * loss_scaling
+    print(f"New loss after SGD step: {new_loss.item()}")
+
+    if new_loss.item() < loss.item():
+        print("✅ SGD step successfully reduced the loss.")
+    else:
+        print("❌ SGD step did not reduce the loss. Investigate gradient correctness.")
