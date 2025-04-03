@@ -10,6 +10,7 @@ import torch.autograd as autograd
 import pdb
 import os.path as osp
 import os
+from utils import draw_grid_v
 
 """
 Test the gradient computation of Young’s modulus E.
@@ -114,9 +115,13 @@ class SimulationInterface(autograd.Function):
         if loss_in_warp:
             wp_loss = wp.zeros(1, dtype=wp.float64, requires_grad=True, device=mpm_state.particle_stress.device)
 
-
-        # print(f"check particle_mass")
-        # print(mpm_state.particle_mass.numpy()) # [7.81103881 7.81103881 7.81103881]
+        # Define impulse parameters
+        impulse_mask = torch.ones(n_particles, dtype=torch.int32, device=device)
+        impulse_param = Impulse_modifier()
+        impulse_param.start_time = 0.0
+        impulse_param.end_time = 1.0
+        impulse_param.mask = wp.from_torch(impulse_mask)
+        impulse_param.force = wp.vec3d(0.0, 0.0, 1.0)  # Apply Z impulse  
 
         with cond_tape:
             wp.launch(
@@ -134,8 +139,28 @@ class SimulationInterface(autograd.Function):
             )
 
 
-            # print(f"check grid_counter \n {grid_counter.numpy()}")
+            # print(f"check grid_v_in after p2g_apic_with_stress")
+            # grid_v_in_after_p2g = wp.to_torch(mpm_state.grid_v_in).detach().clone()
+            # print(grid_v_in_after_p2g)
+
+            # We add the "apply_impulse" kernel. Ideally, this should not affect the gradient w.r.t stress tensor
+            wp.launch(
+                kernel=p2g_apply_impulse,
+                dim=n_particles,
+                inputs=[0.0, dt, mpm_state, mpm_model, impulse_param],
+                device=device,
+            )
+            # print(f"check grid_v_in after p2g_apply_impulse")
+            # grid_v_in_after_impulse = wp.to_torch(mpm_state.grid_v_in).detach().clone()
+            # print(grid_v_in_after_impulse)
+
+            # check the difference between grid_v_in_after_p2g and grid_v_in_after_impulse
+            # grid_v_in_diff = grid_v_in_after_impulse - grid_v_in_after_p2g
+            # print(f"check grid_v_in_diff")
+            # print(grid_v_in_diff)
             # pdb.set_trace()
+
+            
 
             if loss_in_warp:
 
@@ -196,6 +221,10 @@ class SimulationInterface(autograd.Function):
             grid_size = (mpm_model.grid_dim_x, mpm_model.grid_dim_y, mpm_model.grid_dim_z)
             loss_wp = wp.zeros(1, dtype=wp.float64, device=device, requires_grad=True)
 
+            # # TODO: check if we can directly assign the gradient from torch to warp
+            # mpm_state.grid_v_in.grad = grad_vin_wp
+            # tape.backward() # NOTE: it doesn't work -> return all zeros
+
             with tape:
                 wp.launch(
                     compute_grid_vin_loss_with_grad,
@@ -219,12 +248,16 @@ class SimulationInterface(autograd.Function):
                 #     inputs=[loss_wp, loss_scaling],
                 #     device=device,
                 # )
-
+        
+            
             print(f"loss_wp: {loss_wp}")
             tape.backward(loss_wp)
             
             stress_grad_wp = mpm_state.particle_stress.grad
             stress_grad_torch = wp.to_torch(stress_grad_wp).detach().clone()
+            print(f"check stress_grad_torch")
+            print(stress_grad_torch)
+            pdb.set_trace()
             ctx.tape.zero()
 
             return stress_grad_torch, None, None, None, None, None  # No gradients for init_x, init_v, init_volume, init_cov
@@ -246,6 +279,7 @@ def check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov):
     particle_stress.requires_grad_()
     if loss_in_warp:
         loss_autodiff = SimulationInterface.apply(particle_stress, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), True)
+        output_autodiff = None
     else:
         output_autodiff = SimulationInterface.apply(particle_stress, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), True)
         if loss_type == 1:
@@ -349,7 +383,7 @@ def check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov):
                     
                     grad_finite_diff[n, i, j] = (loss_plus - loss_minus) / (2 * perturbation)
 
-                    print(f"perturbation {perturbation}, loss_plus {loss_plus}, loss_minus {loss_minus}, grad {grad_finite_diff[n, i, j]}")
+                    # print(f"perturbation {perturbation}, loss_plus {loss_plus}, loss_minus {loss_minus}, grad {grad_finite_diff[n, i, j]}")
 
         print(f"relative_eps: {relative_eps}, loss_plus {loss_plus}, loss_minus {loss_minus}, finite_diff: \n{grad_finite_diff}")
 
@@ -359,7 +393,7 @@ def check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov):
         grad_error = torch.norm(grad_finite_diff - grad_autodiff) / torch.norm(grad_finite_diff + grad_autodiff)
         print(f"relative grad_error: {grad_error}")
 
-    return grad_error
+    return grad_error, output_autodiff
 
 
 
@@ -444,14 +478,14 @@ if __name__ == "__main__":
     print(f"check initial particle_stress: shape {particle_stress.shape}, min {particle_stress.min()}, max {particle_stress.max()}")
     print(f"Run with loss_in_warp: {loss_in_warp}")
 
-    # Compute Autodiff and Finite Difference Gradient for particle_stress
-    grad_error = check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov)
+    # # Compute Autodiff and Finite Difference Gradient for particle_stress
+    # grad_error, output_autodiff = check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov)
 
-    # Compare error
-    if grad_error < 1e-3:
-        print("Gradient verification passed!")
-    else:
-        print("Gradient check failed!")
+    # # Compare error
+    # if grad_error < 1e-3:
+    #     print("Gradient verification passed!")
+    # else:
+    #     print("Gradient check failed!")
     
 
 
@@ -462,6 +496,7 @@ if __name__ == "__main__":
     particle_stress_sgd = particle_stress.detach().clone().requires_grad_(True)
     # print(f"check particle_stress_sgd")
     # print(particle_stress_sgd)
+
 
     # Compute original loss and grad
     if loss_in_warp:
@@ -477,7 +512,19 @@ if __name__ == "__main__":
     print(f"Original loss: {loss.item()}")
     loss.backward()
     grad = particle_stress_sgd.grad.clone()
-    # print(f"Gradient of loss w.r.t. particle_stress: \n{grad}")
+    print(f"Gradient of loss w.r.t. particle_stress: \n{grad}")
+    # # save the gradient to a numpy array
+    # output_path = osp.join(log_dir, "gradient_w_apply_impulse.npy")
+    # np.save(output_path, grad.detach().cpu().numpy())
+    # print(f"Save autodiff gradient to {output_path}")
+
+
+    # print(f"Compare grid_v and output_autodiff")
+    # grid_v_diff = grid_v - output_autodiff
+    # print(f"grid_v_diff: {grid_v_diff}")
+    # # draw the plot for grid_v_diff
+    # draw_grid_v(grid_v_diff.detach().cpu().numpy(), log_dir, figname=f"grid_v_diff_n_particles_{n_particles}.png")
+    # pdb.set_trace()
 
 
     # Perform SGD update

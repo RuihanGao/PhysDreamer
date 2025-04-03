@@ -444,14 +444,14 @@ if __name__ == "__main__":
     print(f"check initial particle_stress: shape {particle_stress.shape}, min {particle_stress.min()}, max {particle_stress.max()}")
     print(f"Run with loss_in_warp: {loss_in_warp}")
 
-    # Compute Autodiff and Finite Difference Gradient for particle_stress
-    grad_error = check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov)
+    # # Compute Autodiff and Finite Difference Gradient for particle_stress
+    # grad_error = check_autodiff(particle_stress, init_x, init_v, init_volume, init_cov)
 
-    # Compare error
-    if grad_error < 1e-3:
-        print("Gradient verification passed!")
-    else:
-        print("Gradient check failed!")
+    # # Compare error
+    # if grad_error < 1e-3:
+    #     print("Gradient verification passed!")
+    # else:
+    #     print("Gradient check failed!")
     
 
 
@@ -477,7 +477,11 @@ if __name__ == "__main__":
     print(f"Original loss: {loss.item()}")
     loss.backward()
     grad = particle_stress_sgd.grad.clone()
-    # print(f"Gradient of loss w.r.t. particle_stress: \n{grad}")
+    print(f"Gradient of loss w.r.t. particle_stress: \n{grad}")
+    # save the gradient to a numpy array
+    output_path = osp.join(log_dir, "gradient_wo_apply_impulse.npy")
+    np.save(output_path, grad.detach().cpu().numpy())
+    print(f"Save autodiff gradient to {output_path}")
 
 
     # Perform SGD update
