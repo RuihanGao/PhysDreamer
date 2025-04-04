@@ -13,12 +13,27 @@ import sys
 physdreamer_dir = osp.dirname(osp.dirname(osp.dirname(osp.dirname(os.getcwd()))))
 sys.path.append(physdreamer_dir)
 
+
+DATA_TYPE = 1 # 1 for single, 2 for double
 from physdreamer.warp_mpm.warp_utils import from_torch_safe, MyTape, CondTape
-from physdreamer.warp_mpm.mpm_solver_diff import MPMWARPDiff
-from physdreamer.warp_mpm.mpm_utils import compute_position_l2_loss, aggregate_grad, compute_posloss_with_grad
-from physdreamer.warp_mpm.mpm_data_structure import MPMStateStruct, MPMModelStruct, get_float_array_product
-from physdreamer.warp_mpm.mpm_utils import (compute_Closs_with_grad, compute_Floss_with_grad, 
-                                                compute_posloss_with_grad, compute_veloloss_with_grad)
+if DATA_TYPE == 1:
+    from physdreamer.warp_mpm.mpm_solver_diff import MPMWARPDiff
+    from physdreamer.warp_mpm.mpm_utils import compute_position_l2_loss, aggregate_grad, compute_posloss_with_grad, compute_Closs_with_grad, compute_Floss_with_grad, compute_posloss_with_grad, compute_veloloss_with_grad
+    from physdreamer.warp_mpm.mpm_data_structure import MPMStateStruct, MPMModelStruct, get_float_array_product
+    warp_dtype = wp.float32
+    warp_vec_dtype = wp.vec3f
+    torch_dtype = torch.float32
+elif DATA_TYPE == 2:
+    from physdreamer.warp_mpm.mpm_solver_diff_double import MPMWARPDiff
+    from physdreamer.warp_mpm.mpm_utils_double import compute_position_l2_loss, aggregate_grad, compute_posloss_with_grad, compute_Closs_with_grad, compute_Floss_with_grad, compute_posloss_with_grad, compute_veloloss_with_grad
+    from physdreamer.warp_mpm.mpm_data_structure_double import MPMStateStruct, MPMModelStruct, get_float_array_product
+    warp_dtype = wp.float64
+    warp_vec_dtype = wp.vec3d
+    torch_dtype = torch.float64
+else:
+    raise ValueError("DATA_TYPE should be 1 or 2")
+
+
 import pdb
 import numpy as np
 
@@ -75,13 +90,13 @@ class MPMDifferentiableSimulation(autograd.Function):
             E_inp = E.item() # float
             ctx.aggregating_E = True
         else:
-            E_inp = from_torch_safe(E, dtype=wp.float32, requires_grad=requires_grad)
+            E_inp = from_torch_safe(E, dtype=warp_dtype, requires_grad=requires_grad)
             ctx.aggregating_E = False
         if nu.ndim == 0:
             nu_inp = nu.item() # float
             ctx.aggregating_nu = True
         else:
-            nu_inp = from_torch_safe(nu, dtype=wp.float32, requires_grad=requires_grad)
+            nu_inp = from_torch_safe(nu, dtype=warp_dtype, requires_grad=requires_grad)
             ctx.aggregating_nu = False
             
         mpm_solver.set_E_nu(mpm_model, E_inp, nu_inp, device=device)
@@ -288,13 +303,13 @@ class MPMDifferentiableSimulationWCheckpoint(autograd.Function):
             E_inp = E.item() # float
             ctx.aggregating_E = True
         else:
-            E_inp = from_torch_safe(E, dtype=wp.float32, requires_grad=True)
+            E_inp = from_torch_safe(E, dtype=warp_dtype, requires_grad=True)
             ctx.aggregating_E = False
         if nu.ndim == 0:
             nu_inp = nu.item() # float
             ctx.aggregating_nu = True
         else:
-            nu_inp = from_torch_safe(nu, dtype=wp.float32, requires_grad=True)
+            nu_inp = from_torch_safe(nu, dtype=warp_dtype, requires_grad=True)
             ctx.aggregating_nu = False
             
         mpm_solver.set_E_nu(mpm_model, E_inp, nu_inp, device=device)
@@ -365,15 +380,14 @@ class MPMDifferentiableSimulationWCheckpoint(autograd.Function):
             E_inp = E.item() # float
             ctx.aggregating_E = True
         else:
-            E_inp = from_torch_safe(E, dtype=wp.float32, requires_grad=True)
+            E_inp = from_torch_safe(E, dtype=warp_dtype, requires_grad=True)
             ctx.aggregating_E = False
         if nu.ndim == 0:
             nu_inp = nu.item() # float
             ctx.aggregating_nu = True
         else:
-            nu_inp = from_torch_safe(nu, dtype=wp.float32, requires_grad=True)
+            nu_inp = from_torch_safe(nu, dtype=warp_dtype, requires_grad=True)
             ctx.aggregating_nu = False
-            
         mpm_solver.set_E_nu(mpm_model, E_inp, nu_inp, device=device)
 
         starting_state.reset_density(
@@ -560,7 +574,7 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         mpm_model: MPMModelStruct,
         substep_size: float, 
         num_substeps: int,
-        particle_x: Float[Tensor, "n 3"], 
+        particle_x: Float[Tensor, "n 3", ], 
         particle_v: Float[Tensor, "n 3"],
         particle_F: Float[Tensor, "n 3 3"],
         particle_C: Float[Tensor, "n 3 3"],
@@ -589,18 +603,18 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         # set x, v, F, C.
 
         if E.ndim == 0:
-            E_inp = E.item() # float
+            E_inp = E.to(torch_dtype).item() # float
             ctx.aggregating_E = True
         else:
-            E_inp = from_torch_safe(E, dtype=wp.float32, requires_grad=True)
+            E_inp = from_torch_safe(E, dtype=warp_dtype, requires_grad=True)
             ctx.aggregating_E = False
         if nu.ndim == 0:
-            nu_inp = nu.item() # float
+            nu_inp = nu.to(torch_dtype).item() # float
             ctx.aggregating_nu = True
         else:
-            nu_inp = from_torch_safe(nu, dtype=wp.float32, requires_grad=True)
+            nu_inp = from_torch_safe(nu, dtype=warp_dtype, requires_grad=True)
             ctx.aggregating_nu = False
-            
+        
         mpm_solver.set_E_nu(mpm_model, E_inp, nu_inp, device=device)
         mpm_solver.prepare_mu_lam(mpm_model, mpm_state, device=device)
 
@@ -693,21 +707,7 @@ class MPMDifferentiableSimulationClean(autograd.Function):
     def backward(ctx, out_pos_grad: Float[Tensor, "n 3"], out_velo_grad: Float[Tensor, "n 3"], 
                  out_F_grad: Float[Tensor, "n 9"], out_C_grad: Float[Tensor, "n 9"], out_cov_grad: Float[Tensor, "n 6"]):
 
-        print(f"in customize backward, check torch tensor shape, out_pos_grad {out_pos_grad.shape}, out_velo_grad {out_velo_grad.shape}, out_F_grad {out_F_grad.shape}, out_C_grad {out_C_grad.shape}, out_cov_grad {out_cov_grad.shape}")
-
-        # pdb.set_trace()
-
-        # # ### Trial Experiment Starts
-        # # postfix = "direct_backward"
-        # # # 2025-02-26 Implement direct backward through warp
-        # ctx.prev_state.particle_x.grad = from_torch_safe(out_pos_grad, dtype=wp.vec3, requires_grad=True)
-        # ctx.prev_state.particle_v.grad = from_torch_safe(out_velo_grad, dtype=wp.vec3, requires_grad=True)
-        # ctx.prev_state.particle_F_trial.grad = from_torch_safe(out_F_grad, dtype=wp.mat33, requires_grad=True)
-        # ctx.prev_state.particle_C.grad = from_torch_safe(out_C_grad, dtype=wp.mat33, requires_grad=True)
-        # # ctx.prev_state.particle_cov.grad = from_torch_safe(out_cov_grad, dtype=wp.vec6, requires_grad=True) # gradient dossn't match
-        # ctx.tape.backward() 
-        # # ### Trial Experiment Ends
-
+        # print(f"in customize backward, check torch tensor shape, out_pos_grad {out_pos_grad.shape}, out_velo_grad {out_velo_grad.shape}, out_F_grad {out_F_grad.shape}, out_C_grad {out_C_grad.shape}, out_cov_grad {out_cov_grad.shape}") # out_pos_grad torch.Size([5337, 3]), out_velo_grad torch.Size([5337, 3]), out_F_grad torch.Size([5337, 3, 3]), out_C_grad torch.Size([5337, 3, 3]), out_cov_grad torch.Size([5337, 6])
 
         num_particles = ctx.num_particles
         device = ctx.device
@@ -722,13 +722,13 @@ class MPMDifferentiableSimulationClean(autograd.Function):
         postfix = "_org"
         with wp.ScopedDevice(device):
             
-            grad_pos_wp = from_torch_safe(out_pos_grad, dtype=wp.vec3, requires_grad=False)
+            grad_pos_wp = from_torch_safe(out_pos_grad, dtype=warp_vec_dtype, requires_grad=False)
 
             # print(f"check state before tape backward")
             # pdb.set_trace()
             
             with tape:
-                loss_wp = torch.zeros(1, device=device)
+                loss_wp = torch.zeros(1, device=device).to(torch_dtype)
                 loss_wp = wp.from_torch(loss_wp, requires_grad=True)
                 target_pos_detach = wp.clone(next_state.particle_x, device=device, requires_grad=False)
                 wp.launch(
@@ -775,7 +775,7 @@ class MPMDifferentiableSimulationClean(autograd.Function):
 
         # grad for E, nu. TODO: add spatially varying E, nu later
         if ctx.aggregating_E:
-            E_grad = wp.from_torch(torch.zeros(1, device=device), requires_grad=False)
+            E_grad = wp.from_torch(torch.zeros(1, device=device, dtype=torch_dtype), requires_grad=False)
             wp.launch(
                 aggregate_grad,
                 dim=num_particles,
@@ -790,7 +790,7 @@ class MPMDifferentiableSimulationClean(autograd.Function):
             E_grad = wp.to_torch(mpm_model.E.grad).detach().clone()
 
         if ctx.aggregating_nu:
-            nu_grad = wp.from_torch(torch.zeros(1, device=device), requires_grad=False)
+            nu_grad = wp.from_torch(torch.zeros(1, device=device, dtype=torch_dtype), requires_grad=False)
             wp.launch(
                 aggregate_grad,
                 dim=num_particles,

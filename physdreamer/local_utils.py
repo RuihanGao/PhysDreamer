@@ -25,6 +25,8 @@ from physdreamer.gaussian_3d.utils.rigid_body_utils import (
     quaternion_multiply,
 )
 
+import pdb
+
 
 def cycle(dl: torch.utils.data.DataLoader):
     while True:
@@ -512,8 +514,8 @@ def render_gaussian_seq_w_mask_with_disp(
         new_xyz, new_rotation = interpolate_points_w_R(
             query_pts, query_rotation, orign_points, disp, top_k_index
         )
-        gaussians._xyz[update_mask, ...] = new_xyz
-        gaussians._rotation[update_mask, ...] = new_rotation
+        gaussians._xyz[update_mask, ...] = new_xyz.to(torch.float32) # always use float32 for gaussians 
+        gaussians._rotation[update_mask, ...] = new_rotation.to(torch.float32)
 
         cov3D_precomp = None
 

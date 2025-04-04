@@ -438,10 +438,6 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: wp.fl
                         * (state.particle_v[p] + C * dpos)
                         + dt * elastic_force
                     )
-                    if p == 0:
-                        print(ix)
-                        print(iy)
-                        print(iz)
                     wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
                     wp.atomic_add(
                         state.grid_m, ix, iy, iz, weight * state.particle_mass[p]

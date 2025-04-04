@@ -61,14 +61,26 @@ from typing import NamedTuple
 import torch.nn.functional as F
 
 from motionrep.utils.img_utils import compute_psnr, compute_ssim
-
-from physdreamer.warp_mpm.mpm_data_structure import (
-    MPMStateStruct,
-    MPMModelStruct,
-)
-from physdreamer.warp_mpm.mpm_solver_diff import MPMWARPDiff
-from physdreamer.warp_mpm.gaussian_sim_utils import get_volume
 import warp as wp
+
+DATA_TYPE = 1 # 1 for single, 2 for double
+from physdreamer.warp_mpm.warp_utils import from_torch_safe, MyTape, CondTape
+if DATA_TYPE == 1:
+    from physdreamer.warp_mpm.mpm_solver_diff import MPMWARPDiff
+    from physdreamer.warp_mpm.mpm_data_structure import MPMStateStruct, MPMModelStruct
+    warp_dtype = wp.float32
+    torch_dtype = torch.float32
+    numpy_dtype = np.float32
+elif DATA_TYPE == 2:
+    from physdreamer.warp_mpm.mpm_solver_diff_double import MPMWARPDiff
+    from physdreamer.warp_mpm.mpm_data_structure_double import MPMStateStruct, MPMModelStruct
+    warp_dtype = wp.float64
+    torch_dtype = torch.float64
+    numpy_dtype = np.float64
+else:
+    raise ValueError("DATA_TYPE should be 1 or 2")
+
+from physdreamer.warp_mpm.gaussian_sim_utils import get_volume
 import random
 
 from physdreamer.local_utils import (
@@ -107,6 +119,8 @@ model_dict = {
     # psnr: 30.52
     "videos_2": "../../output/inverse_sim/fast_hat_videos2_velopretraindecay_1.0_substep_96_se3_field_lr_0.003_tv_0.01_iters_300_sw_2_cw_2/seed0/checkpoint_model_000199",
 }
+
+E_SCALING = 1e7
 
 
 def create_dataset(args):
@@ -268,7 +282,8 @@ class Trainer:
 
         self.E_nu_list = E_nu_list
         self.FD_perturb_E = args.FD_perturb_E
-        self.E_nu_list[0] += self.FD_perturb_E
+        if self.FD_perturb_E > 0:
+            self.E_nu_list[0] += self.FD_perturb_E
         self.save_FD_loss = args.save_FD_loss
         self.save_FD_grad = args.save_FD_grad
         self.total_substeps = args.total_substeps
@@ -469,20 +484,20 @@ class Trainer:
         # init young modulus and poisson ratio
 
         young_numpy = np.exp(np.random.uniform(np.log(1e-3), np.log(1e3))).astype(
-            np.float32
+            numpy_dtype
         )
         
         if self.homo_material:
             young_numpy = self.initE
         else:
-            young_numpy = np.array([self.initE]).astype(np.float32)
+            young_numpy = np.array([self.initE]).astype(numpy_dtype)
 
-        young_modulus = torch.tensor(young_numpy, dtype=torch.float32).to(
+        young_modulus = torch.tensor(young_numpy, dtype=torch_dtype).to(
             self.accelerator.device
         )
 
         poisson_numpy = np.random.uniform(0.1, 0.4) if poisson_numpy is None else poisson_numpy
-        poisson_ratio = torch.tensor(poisson_numpy, dtype=torch.float32).to(
+        poisson_ratio = torch.tensor(poisson_numpy, dtype=torch_dtype).to(
             self.accelerator.device
         )
 
@@ -528,7 +543,7 @@ class Trainer:
                     fill_xyzs.shape[0], int(fill_xyzs.shape[0] * 0.25), replace=False
                 )
             ]
-            fill_xyzs = torch.from_numpy(fill_xyzs).float().to("cuda")
+            fill_xyzs = torch.from_numpy(fill_xyzs).to(torch_dtype).to("cuda")
             self.fill_xyzs = fill_xyzs
             print(
                 "loaded {} internal filled points from: ".format(fill_xyzs.shape[0]),
@@ -592,7 +607,7 @@ class Trainer:
 
         sim_gaussian_pos = self.render_params.gaussians.get_xyz.detach().clone()[
             self.sim_mask_in_raw_gaussian, :
-        ]
+        ].to(torch_dtype)
         sim_gaussian_pos = (sim_gaussian_pos + shift) / scale
 
         cdist = torch.cdist(sim_gaussian_pos, sim_xyzs) * -1.0
@@ -625,7 +640,7 @@ class Trainer:
 
         mpm_state.from_torch(
             self.particle_init_position.clone(),
-            torch.from_numpy(points_volume).float().to(device).clone(),
+            torch.from_numpy(points_volume).to(torch_dtype).to(device).clone(),
             sim_cov,
             device=device,
             requires_grad=True,
@@ -660,7 +675,7 @@ class Trainer:
         moving_pts_path = os.path.join(dataset_dir, "moving_part_points.ply")
         if os.path.exists(moving_pts_path):
             moving_pts = pcu.load_mesh_v(moving_pts_path)
-            moving_pts = torch.from_numpy(moving_pts).float().to(device)
+            moving_pts = torch.from_numpy(moving_pts).to(torch_dtype).to(device)
             moving_pts = (moving_pts + shift) / scale
             freeze_mask = find_far_points(
                 sim_xyzs, moving_pts, thres=0.5 / grid_size
@@ -694,17 +709,25 @@ class Trainer:
             torch.ones_like(self.particle_init_position[..., 0])
             * material_params["density"]
         )
-        youngs_modulus = (
+        if self.homo_material:
+            # for homogeneous material, E_nu_list is the trainable parameter. shouldn't detach it
+            youngs_modulus = (
             torch.ones_like(self.particle_init_position[..., 0])
-            * self.E_nu_list[0].detach() * 1e7
+            * self.E_nu_list[0] * E_SCALING
         )
+        else:
+            # original implementation
+            youngs_modulus = (
+                torch.ones_like(self.particle_init_position[..., 0])
+                * self.E_nu_list[0].detach() * E_SCALING
+            )
         poisson_ratio = torch.ones_like(self.particle_init_position[..., 0]) * 0.3
 
         # load stem for higher density
         stem_pts_path = os.path.join(dataset_dir, "stem_points.ply")
         if os.path.exists(stem_pts_path):
             stem_pts = pcu.load_mesh_v(stem_pts_path)
-            stem_pts = torch.from_numpy(stem_pts).float().to(device)
+            stem_pts = torch.from_numpy(stem_pts).to(torch_dtype).to(device)
             stem_pts = (stem_pts + shift) / scale
             no_stem_mask = find_far_points(
                 sim_xyzs, stem_pts, thres=2.0 / grid_size
@@ -766,9 +789,9 @@ class Trainer:
             ret_velocity = torch.zeros_like(initial_position_time0)
 
             center_point = (
-                torch.from_numpy(np.array(self.center_point)).to(device).float()
+                torch.from_numpy(np.array(self.center_point)).to(device).to(torch_dtype)
             )
-            force = torch.from_numpy(np.array(self.force_dir)*self.force_mag).to(device).float()
+            force = torch.from_numpy(np.array(self.force_dir)*self.force_mag).to(device).to(torch_dtype)
 
             force_duration = self.force_duration  # sec
             force_duration_steps = int(force_duration / delta_time)
@@ -806,7 +829,11 @@ class Trainer:
 
         else:
             # velocity = self.velo_fields(torch.cat([query_pts, time_array.unsqueeze(-1)], dim=-1))[..., :3]
-            velocity = self.velo_fields(query_pts)[..., :3]
+            # params -> float32, buffer -> float64
+            self.velo_fields = self.velo_fields.float() # TODO: check where we change the buffer dtype to float64 for sim_fields and velo_fields
+            velocity = self.velo_fields(query_pts.float()).to(torch_dtype) # uses float data type for the network
+            velocity = velocity[..., :3]
+
 
             # scaling
             velocity = velocity * 0.1  # not padded yet # TODO: why scale the velocity by 0.1?
@@ -815,7 +842,7 @@ class Trainer:
             ret_velocity[query_mask, :] = velocity
 
         # init F as Idensity Matrix, and C and Zero Matrix
-        I_mat = torch.eye(3, dtype=torch.float32).to(device)
+        I_mat = torch.eye(3, dtype=torch_dtype).to(device)
         particle_F = torch.repeat_interleave(
             I_mat[None, ...], initial_position_time0.shape[0], dim=0
         )
@@ -843,7 +870,12 @@ class Trainer:
         if self.args.entropy_cls > 0:
             sim_params, entropy = self.sim_fields(query_pts)
         else:
-            sim_params = self.sim_fields(query_pts)
+            # (Pdb) print([p.dtype for p in self.sim_fields.parameters()])
+            # [torch.float32, torch.float32, torch.float32, torch.float32, torch.float32, torch.float32, torch.float32]
+            # (Pdb) print([p.dtype for p in self.sim_fields.buffers()])
+            # [torch.float64]
+            self.sim_fields = self.sim_fields.float()
+            sim_params = self.sim_fields(query_pts.float()).to(torch_dtype) # uses float data type for the network
             entropy = torch.zeros(1).to(sim_params.device)
 
         sim_params = sim_params * 1000
@@ -983,8 +1015,6 @@ class Trainer:
             temporal_stride = window_size
 
         for start_time_idx in range(0, window_size, temporal_stride):
-
-
             # 2025-02-28 Enfore a few substesps
             if self.total_substeps > 0:
                 total_substeps = self.total_substeps
@@ -1038,7 +1068,7 @@ class Trainer:
                             particle_velo,
                             particle_F,
                             particle_C,
-                            perturb_E*1e7,
+                            perturb_E*E_SCALING,
                             self.E_nu_list[1],
                             density,
                             query_mask,
@@ -1070,6 +1100,7 @@ class Trainer:
                 loss_w_perturbation = 0.0
                 if self.lambda_pos_l2 > 0:
                     # TODO: 2025-02-25: verify the gradient computation with finite difference
+                    
                     pos_L2_loss_w_perturbation = F.mse_loss(perturb_gaussian_pos, gt_pos_frame, reduction="none")
                     print(f"compute pos_L2_loss_w_perturbation, shape {pos_L2_loss_w_perturbation.shape}, mean {pos_L2_loss_w_perturbation.mean().item()}")
                     # pos_L2_loss = pos_L2_loss_w_perturbation.mean()
@@ -1089,7 +1120,7 @@ class Trainer:
                             particle_velo,
                             particle_F,
                             particle_C,
-                            (self.E_nu_list[0]+perturb_E)*1e7,
+                            (self.E_nu_list[0]+perturb_E)*E_SCALING,
                             self.E_nu_list[1],
                             density,
                             query_mask,
@@ -1167,7 +1198,7 @@ class Trainer:
                                     particle_velo,
                                     particle_F,
                                     particle_C,
-                                    self.E_nu_list[0]*1e7,
+                                    self.E_nu_list[0]*E_SCALING,
                                     self.E_nu_list[1],
                                     density,
                                     query_mask,
@@ -1212,7 +1243,7 @@ class Trainer:
                             particle_velo,
                             particle_F,
                             particle_C,
-                            self.E_nu_list[0]*1e7,
+                            self.E_nu_list[0]*E_SCALING,
                             self.E_nu_list[1],
                             density,
                             query_mask,
@@ -1342,6 +1373,9 @@ class Trainer:
                 
                 if self.lambda_pos_l2 > 0:
 
+                    gaussian_pos = gaussian_pos.to(torch_dtype)
+                    gt_pos_frame = gt_pos_frame.to(torch_dtype)
+
                     if self.save_FD_loss:
                         # TODO: 2025-02-25: verify the gradient computation with finite difference
                         pos_L2_loss = F.mse_loss(gaussian_pos, gt_pos_frame, reduction="none")
@@ -1385,10 +1419,9 @@ class Trainer:
                 # divide d the eentire loss by accumulateive size
                 loss = loss / self.args.compute_window
 
-                print(f"check loss details, img_l2_loss {l2_loss.item()}, pos_L2_loss {pos_L2_loss.item()}, pos_chamfer_loss {pos_chamfer_loss.item()}, sm_spatial_loss {sm_spatial_loss.item()}, sm_velo_loss {sm_velo_loss.item()}, entropy {entropy.item()}, loss {loss.item()}")
-
                 loss.backward()
 
+            self.E_nu_list[0].grad = self.E_nu_list[0].grad / E_SCALING
             E_grad = self.E_nu_list[0].grad
             print(f"check gradient for E, step {self.step}, grad {E_grad.item()}")
             particle_pos, particle_velo, particle_F, particle_C = (
@@ -1442,7 +1475,7 @@ class Trainer:
             or self.step == (self.train_iters - 1)
             or (self.step % self.log_iters == self.log_iters - 1)
         ):
-
+            
             torch.nn.utils.clip_grad_norm_(
                 self.trainable_params,
                 self.max_grad_norm,
@@ -1475,8 +1508,22 @@ class Trainer:
 
             print(f"check E_nu_list before optimizer update: {self.E_nu_list[0].item()}, {self.E_nu_list[1].item()}")
             print(f"optimizer step ...")
-            self.optimizer.step()
-            self.optimizer.zero_grad()
+
+            # self.optimizer.step()
+            # self.optimizer.zero_grad()
+
+            # manually update the E_nu_list[0] parameter since it is not updated by the optimizer
+
+            # (Pdb) print(self.E_nu_list[0].grad)
+            # tensor(2.3753e-05, device='cuda:0', dtype=torch.float64)
+            # (Pdb) print(self.E_nu_list[0].grad_fn)
+            # None
+
+            self.E_nu_list[0] = self.E_nu_list[0] - E_grad * self.optimizer.param_groups[0]["lr"]
+
+            print(f"check E_nu_list after optimizer update: {self.E_nu_list[0].item()}, {self.E_nu_list[1].item()}")
+            pdb.set_trace()
+
             if do_velo_opt:
                 assert self.velo_optimizer is not None
                 torch.nn.utils.clip_grad_norm_(
@@ -1555,9 +1602,9 @@ class Trainer:
                 wandb_dict.update(log_psnr_dict)
                 simulated_video = self.inference(cam, substep=num_substeps)
                 sim_video_torch = (
-                    torch.from_numpy(simulated_video).float().to(device) / 255.0
+                    torch.from_numpy(simulated_video).to(torch_dtype).to(device) / 255.0
                 )
-                gt_video_torch = torch.from_numpy(gt_video).float().to(device) / 255.0
+                gt_video_torch = torch.from_numpy(gt_video).to(torch_dtype).to(device) / 255.0
 
                 full_psnr = compute_psnr(sim_video_torch[1:], gt_video_torch)
 
@@ -1580,8 +1627,7 @@ class Trainer:
                 young_color_full = torch.ones_like(
                     self.render_params.gaussians._xyz[:, 0]
                 )
-
-                young_color_full[self.sim_mask_in_raw_gaussian] = young_color
+                young_color_full[self.sim_mask_in_raw_gaussian] = young_color.to(torch.float32) # use float for gaussian rendering
                 young_color = torch.stack(
                     [young_color_full, young_color_full, young_color_full], dim=-1
                 )
@@ -1702,6 +1748,7 @@ class Trainer:
         self.mpm_state.reset_density(
             density.clone(), query_mask, device, update_mass=True
         )
+        print(f"set_E_nu_from_torch in inference, youngs_modulus {type(youngs_modulus)}")
         self.mpm_solver.set_E_nu_from_torch(
             self.mpm_model, youngs_modulus.clone(), poisson.clone(), device
         )
@@ -1849,11 +1896,13 @@ class Trainer:
 
         # clean_points_path = os.path.join(gaussian_dir, "clean_object_points.ply")
         # 2025-02-23: change the clean points to a downsampled ply and filtered out the points that are too far away due to downsampling process
-        clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered.ply")
+        # clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered.ply")
+        # 2025-04-04: use a ply with smaller number of points to avoid OOM issue
+        clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered_2500.ply")
 
         if os.path.exists(clean_points_path):
             clean_xyzs = pcu.load_mesh_v(clean_points_path)
-            clean_xyzs = torch.from_numpy(clean_xyzs).float().to("cuda")
+            clean_xyzs = torch.from_numpy(clean_xyzs).to(torch_dtype).to("cuda")
             self.clean_xyzs = clean_xyzs
             print(
                 "loaded {} clean points from: ".format(clean_xyzs.shape[0]),
@@ -1861,7 +1910,7 @@ class Trainer:
             )
             # we can use tight threshold here
             not_sim_maks = find_far_points(
-                gaussians._xyz, clean_xyzs, thres=0.01
+                gaussians._xyz, clean_xyzs.float(), thres=0.01
             ).bool()
             sim_mask_in_raw_gaussian = torch.logical_not(not_sim_maks)
             # [N]
@@ -1942,6 +1991,7 @@ class Trainer:
             self.mpm_state.reset_density(
                 density.clone(), query_mask, device, update_mass=True
             )
+            print(f"set_E_nu_from_torch in demo, youngs_modulus {type(youngs_modulus)}")
             self.mpm_solver.set_E_nu_from_torch(
                 self.mpm_model, youngs_modulus.clone(), poisson.clone(), device
             )
@@ -2045,11 +2095,8 @@ def parse_args():
     parser.add_argument("--decoder_hidden_size", type=int, default=64)
     parser.add_argument("--spatial_res", type=int, default=32)
     parser.add_argument("--zero_init", type=bool, default=True)
-
     parser.add_argument("--entropy_cls", type=int, default=-1)
-
     parser.add_argument("--num_frames", type=str, default=14)
-
     parser.add_argument("--grid_size", type=int, default=64)
     parser.add_argument("--sim_res", type=int, default=8)
     parser.add_argument("--sim_output_dim", type=int, default=1)
@@ -2061,7 +2108,6 @@ def parse_args():
     # -1 means no gradient checkpointing
     parser.add_argument("--checkpoint_steps", type=int, default=-1)
     parser.add_argument("--stride", type=int, default=1)
-
     parser.add_argument("--downsample_scale", type=float, default=0.04)
     parser.add_argument("--top_k", type=int, default=8)
 

@@ -110,6 +110,9 @@ class MPMWARPDiff(object):
             mpm_model.grid_v_damping_scale = kwargs["grid_v_damping_scale"]
 
     def set_E_nu(self, mpm_model, E: wp.float64, nu: wp.float64, device="cuda:0"):
+        
+        if isinstance(E, float):
+            E = wp.float64(E)
         if isinstance(E, wp.float64):
             wp.launch(
                 kernel=set_value_to_float_array,
@@ -125,6 +128,9 @@ class MPMWARPDiff(object):
                 device=device,
             )
 
+
+        if isinstance(nu, float):
+            nu = wp.float64(nu)
         if isinstance(nu, wp.float64):
             wp.launch(
                 kernel=set_value_to_float_array,
@@ -151,12 +157,12 @@ class MPMWARPDiff(object):
         if E.ndim == 0:
             E_inp = E.item()  # float
         else:
-            E_inp = from_torch_safe(E, dtype=wp.float32, requires_grad=True)
+            E_inp = from_torch_safe(E, dtype=wp.float64, requires_grad=True)
 
         if nu.ndim == 0:
             nu_inp = nu.item()  # float
         else:
-            nu_inp = from_torch_safe(nu, dtype=wp.float32, requires_grad=True)
+            nu_inp = from_torch_safe(nu, dtype=wp.float64, requires_grad=True)
 
         self.set_E_nu(mpm_model, E_inp, nu_inp, device=device)
 
@@ -1102,7 +1108,7 @@ class MPMWARPDiff(object):
             grid_x, grid_y, grid_z = wp.tid()
 
             if grid_modifier_params.mask[grid_x, grid_y, grid_z] >= 1:
-                state.grid_v_out[grid_x, grid_y, grid_z] = wp.vec3(0.0, 0.0, 0.0)
+                state.grid_v_out[grid_x, grid_y, grid_z] = wp.vec3d(wp.float64(0.0), wp.float64(0.0), wp.float64(0.0))
 
         self.grid_postprocess.append(modify_grid_v_before_g2p)
         self.modify_bc.append(None)
