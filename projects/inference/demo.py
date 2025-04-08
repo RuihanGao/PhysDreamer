@@ -626,7 +626,7 @@ class Trainer:
         # 2025-02-23: change the clean points to a downsampled ply and filtered out the points that are too far away due to downsampling process
         # clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered.ply")
         # 2025-04-04: use a ply with smaller number of points to avoid OOM issue
-        clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered_2500.ply")
+        clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered_1000.ply")
 
         assert os.path.exists(
             clean_points_path

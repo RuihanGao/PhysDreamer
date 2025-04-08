@@ -378,9 +378,9 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: wp.fl
         # convert world-space position to grid-space
         grid_pos = state.particle_x[p] * model.inv_dx
         # find the base grid note (bottom left in 3D)
-        base_pos_x = wp.int(grid_pos[0] - wp.float64(0.5))
-        base_pos_y = wp.int(grid_pos[1] - wp.float64(0.5))
-        base_pos_z = wp.int(grid_pos[2] - wp.float64(0.5))
+        base_pos_x = wp.int(wp.floor(grid_pos[0] - wp.float64(0.5)))
+        base_pos_y = wp.int(wp.floor(grid_pos[1] - wp.float64(0.5)))
+        base_pos_z = wp.int(wp.floor(grid_pos[2] - wp.float64(0.5)))
         # fractional offset of the particle within the grid cell
         fx = grid_pos - wp.vec3d(
             wp.float64(base_pos_x), wp.float64(base_pos_y), wp.float64(base_pos_z)
@@ -409,6 +409,15 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: wp.fl
                     ix = base_pos_x + i
                     iy = base_pos_y + j
                     iz = base_pos_z + k
+
+                    # Clamp or skip invalid grid indices if the particle is too close to the boundary and we are trying to access out-of-bounds grid nodes
+                    if ix < 0 or ix >= model.n_grid:
+                        continue
+                    if iy < 0 or iy >= model.n_grid:
+                        continue
+                    if iz < 0 or iz >= model.n_grid:
+                        continue
+
                     weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                     # if weight < 0:
                     #     print(weight)
@@ -456,10 +465,12 @@ def p2g_apic_with_stress_debug(state: MPMStateStruct, model: MPMModelStruct, dt:
 
         # convert world-space position to grid-space
         grid_pos = state.particle_x[p] * model.inv_dx
+
         # find the base grid note (bottom left in 3D)
-        base_pos_x = wp.int(grid_pos[0] - wp.float64(0.5))
-        base_pos_y = wp.int(grid_pos[1] - wp.float64(0.5))
-        base_pos_z = wp.int(grid_pos[2] - wp.float64(0.5))
+        base_pos_x = wp.int(wp.floor(grid_pos[0] - wp.float64(0.5)))
+        base_pos_y = wp.int(wp.floor(grid_pos[1] - wp.float64(0.5)))
+        base_pos_z = wp.int(wp.floor(grid_pos[2] - wp.float64(0.5)))
+
         # fractional offset of the particle within the grid cell
         fx = grid_pos - wp.vec3d(
             wp.float64(base_pos_x), wp.float64(base_pos_y), wp.float64(base_pos_z)
@@ -488,9 +499,21 @@ def p2g_apic_with_stress_debug(state: MPMStateStruct, model: MPMModelStruct, dt:
                     ix = base_pos_x + i
                     iy = base_pos_y + j
                     iz = base_pos_z + k
+
+                    # Clamp or skip invalid grid indices if the particle is too close to the boundary and we are trying to access out-of-bounds grid nodes
+                    if ix < 0 or ix >= model.n_grid:
+                        continue
+                    if iy < 0 or iy >= model.n_grid:
+                        continue
+                    if iz < 0 or iz >= model.n_grid:
+                        continue
+
                     weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
-                    # if weight < 0:
-                    #     print(weight)
+                    if weight < 0:
+                        print(weight)
+                        print(ix)
+                        print(iy)
+                        print(iz)
                     dweight = compute_dweight(model, w, dw, i, j, k)
 
                     C = state.particle_C[p]
@@ -533,9 +556,10 @@ def p2g_apply_impulse(time: wp.float64, dt: wp.float64, state: MPMStateStruct, m
         # print(time)
         if state.particle_selection[p] == 0 and param.mask[p] >= 1:
             grid_pos = state.particle_x[p] * model.inv_dx
-            base_pos_x = wp.int(grid_pos[0] - wp.float64(0.5))
-            base_pos_y = wp.int(grid_pos[1] - wp.float64(0.5))
-            base_pos_z = wp.int(grid_pos[2] - wp.float64(0.5))
+            # find the base grid note (bottom left in 3D)
+            base_pos_x = wp.int(wp.floor(grid_pos[0] - wp.float64(0.5)))
+            base_pos_y = wp.int(wp.floor(grid_pos[1] - wp.float64(0.5)))
+            base_pos_z = wp.int(wp.floor(grid_pos[2] - wp.float64(0.5)))
 
             fx = grid_pos - wp.vec3d(
                 wp.float64(base_pos_x), wp.float64(base_pos_y), wp.float64(base_pos_z)
@@ -562,6 +586,15 @@ def p2g_apply_impulse(time: wp.float64, dt: wp.float64, state: MPMStateStruct, m
                         ix = base_pos_x + i
                         iy = base_pos_y + j
                         iz = base_pos_z + k
+
+                        # Clamp or skip invalid grid indices if the particle is too close to the boundary and we are trying to access out-of-bounds grid nodes
+                        if ix < 0 or ix >= model.n_grid:
+                            continue
+                        if iy < 0 or iy >= model.n_grid:
+                            continue
+                        if iz < 0 or iz >= model.n_grid:
+                            continue
+
                         weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                         # if weight < wp.float64(0.0):
                         #     print(weight)
@@ -591,9 +624,10 @@ def g2p(state: MPMStateStruct, model: MPMModelStruct, dt: wp.float64):
     p = wp.tid()
     if state.particle_selection[p] == 0:
         grid_pos = state.particle_x[p] * model.inv_dx
-        base_pos_x = wp.int(grid_pos[0] - wp.float64(0.5))
-        base_pos_y = wp.int(grid_pos[1] - wp.float64(0.5))
-        base_pos_z = wp.int(grid_pos[2] - wp.float64(0.5))
+        # find the base grid note (bottom left in 3D)
+        base_pos_x = wp.int(wp.floor(grid_pos[0] - wp.float64(0.5)))
+        base_pos_y = wp.int(wp.floor(grid_pos[1] - wp.float64(0.5)))
+        base_pos_z = wp.int(wp.floor(grid_pos[2] - wp.float64(0.5)))
         fx = grid_pos - wp.vec3d(
             wp.float64(base_pos_x), wp.float64(base_pos_y), wp.float64(base_pos_z)
         )
@@ -616,6 +650,15 @@ def g2p(state: MPMStateStruct, model: MPMModelStruct, dt: wp.float64):
                     ix = base_pos_x + i
                     iy = base_pos_y + j
                     iz = base_pos_z + k
+
+                    # Clamp or skip invalid grid indices if the particle is too close to the boundary and we are trying to access out-of-bounds grid nodes
+                    if ix < 0 or ix >= model.n_grid:
+                        continue
+                    if iy < 0 or iy >= model.n_grid:
+                        continue
+                    if iz < 0 or iz >= model.n_grid:
+                        continue
+
                     dpos = wp.vec3d(wp.float64(i), wp.float64(j), wp.float64(k)) - fx
                     weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                     grid_v = state.grid_v_out[ix, iy, iz]
@@ -658,9 +701,10 @@ def g2p_differentiable(
     p = wp.tid()
     if state.particle_selection[p] == 0:
         grid_pos = state.particle_x[p] * model.inv_dx
-        base_pos_x = wp.int(grid_pos[0] - wp.float64(0.5))
-        base_pos_y = wp.int(grid_pos[1] - wp.float64(0.5))
-        base_pos_z = wp.int(grid_pos[2] - wp.float64(0.5))
+        # find the base grid note (bottom left in 3D)
+        base_pos_x = wp.int(wp.floor(grid_pos[0] - wp.float64(0.5)))
+        base_pos_y = wp.int(wp.floor(grid_pos[1] - wp.float64(0.5)))
+        base_pos_z = wp.int(wp.floor(grid_pos[2] - wp.float64(0.5)))
         fx = grid_pos - wp.vec3d(
             wp.float64(base_pos_x), wp.float64(base_pos_y), wp.float64(base_pos_z)
         )
@@ -685,6 +729,15 @@ def g2p_differentiable(
                     ix = base_pos_x + i
                     iy = base_pos_y + j
                     iz = base_pos_z + k
+
+                    # Clamp or skip invalid grid indices if the particle is too close to the boundary and we are trying to access out-of-bounds grid nodes
+                    if ix < 0 or ix >= model.n_grid:
+                        continue
+                    if iy < 0 or iy >= model.n_grid:
+                        continue
+                    if iz < 0 or iz >= model.n_grid:
+                        continue
+
                     dpos = wp.vec3d(wp.float64(i), wp.float64(j), wp.float64(k)) - fx
                     weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                     grid_v = state.grid_v_out[ix, iy, iz]
@@ -994,9 +1047,10 @@ def set_F_C_p2g(
     p = wp.tid()
     if state.particle_selection[p] == 0:
         grid_pos = state.particle_x[p] * model.inv_dx
-        base_pos_x = wp.int(grid_pos[0] - wp.float64(0.5))
-        base_pos_y = wp.int(grid_pos[1] - wp.float64(0.5))
-        base_pos_z = wp.int(grid_pos[2] - wp.float64(0.5))
+        # find the base grid note (bottom left in 3D)
+        base_pos_x = wp.int(wp.floor(grid_pos[0] - wp.float64(0.5)))
+        base_pos_y = wp.int(wp.floor(grid_pos[1] - wp.float64(0.5)))
+        base_pos_z = wp.int(wp.floor(grid_pos[2] - wp.float64(0.5)))
         fx = grid_pos - wp.vec3d(
             wp.float64(base_pos_x), wp.float64(base_pos_y), wp.float64(base_pos_z)
         )
@@ -1016,6 +1070,15 @@ def set_F_C_p2g(
                     ix = base_pos_x + i
                     iy = base_pos_y + j
                     iz = base_pos_z + k
+
+                    # Clamp or skip invalid grid indices if the particle is too close to the boundary and we are trying to access out-of-bounds grid nodes
+                    if ix < 0 or ix >= model.n_grid:
+                        continue
+                    if iy < 0 or iy >= model.n_grid:
+                        continue
+                    if iz < 0 or iz >= model.n_grid:
+                        continue
+
                     weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                     v_in_add = weight * state.particle_mass[p] * particle_disp
                     wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
@@ -1029,9 +1092,10 @@ def set_F_C_g2p(state: MPMStateStruct, model: MPMModelStruct):
     p = wp.tid()
     if state.particle_selection[p] == 0:
         grid_pos = state.particle_x[p] * model.inv_dx
-        base_pos_x = wp.int(grid_pos[0] - wp.float64(0.5))
-        base_pos_y = wp.int(grid_pos[1] - wp.float64(0.5))
-        base_pos_z = wp.int(grid_pos[2] - wp.float64(0.5))
+        # find the base grid note (bottom left in 3D)
+        base_pos_x = wp.int(wp.floor(grid_pos[0] - wp.float64(0.5)))
+        base_pos_y = wp.int(wp.floor(grid_pos[1] - wp.float64(0.5)))
+        base_pos_z = wp.int(wp.floor(grid_pos[2] - wp.float64(0.5)))
         fx = grid_pos - wp.vec3d(
             wp.float64(base_pos_x), wp.float64(base_pos_y), wp.float64(base_pos_z)
         )
@@ -1054,6 +1118,15 @@ def set_F_C_g2p(state: MPMStateStruct, model: MPMModelStruct):
                     ix = base_pos_x + i
                     iy = base_pos_y + j
                     iz = base_pos_z + k
+
+                    # Clamp or skip invalid grid indices if the particle is too close to the boundary and we are trying to access out-of-bounds grid nodes
+                    if ix < 0 or ix >= model.n_grid:
+                        continue
+                    if iy < 0 or iy >= model.n_grid:
+                        continue
+                    if iz < 0 or iz >= model.n_grid:
+                        continue
+                    
                     dpos = wp.vec3d(wp.float64(i), wp.float64(j), wp.float64(k)) - fx
                     weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                     grid_v = state.grid_v_out[ix, iy, iz]
@@ -1214,6 +1287,30 @@ def compute_grid_vin_loss_with_grad(
 
     # Accumulate the loss gradient contribution
     wp.atomic_add(loss, 0, grid_v_loss)
+
+
+@wp.kernel
+def compute_grid_vout_loss_with_grad(
+    mpm_state: MPMStateStruct,  
+    grad_grid_v_wp: wp.array3d(dtype=wp.vec3d),  
+    scale: wp.float64,  
+    loss: wp.array(dtype=wp.float64)  
+):
+    """
+    Compute how grid velocity `grid_v_in` contributes to the loss gradient.
+    """
+
+    i, j, k = wp.tid()  # Thread index for grid
+
+    # Fetch the current grid velocity
+    grid_v_tensor = mpm_state.grid_v_out[i, j, k]
+
+    # Compute how grid velocity affects loss
+    grid_v_loss = wp.dot(grid_v_tensor, grad_grid_v_wp[i, j, k]) * scale
+
+    # Accumulate the loss gradient contribution
+    wp.atomic_add(loss, 0, grid_v_loss)
+
 
 # create another kernel just to sum up all elememts. check if that matches with loss computation with gradient
 @wp.kernel

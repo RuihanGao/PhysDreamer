@@ -1,6 +1,6 @@
 dataset_dir: 
 # optimization
-warmup_step: 10
+warmup_step: 0 # 10
 max_grad_norm: 10.0
 
 rand_bg: False

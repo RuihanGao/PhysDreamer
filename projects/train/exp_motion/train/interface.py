@@ -14,7 +14,7 @@ physdreamer_dir = osp.dirname(osp.dirname(osp.dirname(osp.dirname(os.getcwd())))
 sys.path.append(physdreamer_dir)
 
 
-DATA_TYPE = 1 # 1 for single, 2 for double
+DATA_TYPE = 2 # 1 for single, 2 for double
 from physdreamer.warp_mpm.warp_utils import from_torch_safe, MyTape, CondTape
 if DATA_TYPE == 1:
     from physdreamer.warp_mpm.mpm_solver_diff import MPMWARPDiff

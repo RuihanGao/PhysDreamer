@@ -63,7 +63,7 @@ import torch.nn.functional as F
 from motionrep.utils.img_utils import compute_psnr, compute_ssim
 import warp as wp
 
-DATA_TYPE = 1 # 1 for single, 2 for double
+DATA_TYPE = 2 # 1 for single, 2 for double
 from physdreamer.warp_mpm.warp_utils import from_torch_safe, MyTape, CondTape
 if DATA_TYPE == 1:
     from physdreamer.warp_mpm.mpm_solver_diff import MPMWARPDiff
@@ -406,11 +406,14 @@ class Trainer:
                 self.velo_optimizer, self.velo_scheduler
             )
 
-        self.optimizer = torch.optim.AdamW(
-            optim_list,
-            lr=args.lr,
-            weight_decay=0.0,
-        )
+        # self.optimizer = torch.optim.AdamW(
+        #     optim_list,
+        #     lr=args.lr,
+        #     weight_decay=0.0,
+        # )
+
+        # TODO: 2025-04-04. Temporarily change to SGD optimizer for debugging
+        self.optimizer = torch.optim.SGD(optim_list, lr=args.lr)
 
 
         self.trainable_params = trainable_params
@@ -1506,23 +1509,26 @@ class Trainer:
 
             # pdb.set_trace()
 
-            print(f"check E_nu_list before optimizer update: {self.E_nu_list[0].item()}, {self.E_nu_list[1].item()}")
-            print(f"optimizer step ...")
+            # print(f"check E_nu_list before optimizer update: {self.E_nu_list[0].item()}, {self.E_nu_list[1].item()}")
+            print(f"grad E {self.E_nu_list[0].grad}")
+            # print(self.optimizer.param_groups[0])
+            # pdb.set_trace()
+            # print(f"optimizer step ...")
 
-            # self.optimizer.step()
-            # self.optimizer.zero_grad()
+            self.optimizer.step()
+            self.optimizer.zero_grad()
 
-            # manually update the E_nu_list[0] parameter since it is not updated by the optimizer
-
+            
             # (Pdb) print(self.E_nu_list[0].grad)
             # tensor(2.3753e-05, device='cuda:0', dtype=torch.float64)
             # (Pdb) print(self.E_nu_list[0].grad_fn)
             # None
 
-            self.E_nu_list[0] = self.E_nu_list[0] - E_grad * self.optimizer.param_groups[0]["lr"]
+            # manually update the E_nu_list[0] parameter since it is not updated by the optimizer
+            # self.E_nu_list[0] = self.E_nu_list[0] - E_grad * self.optimizer.param_groups[0]["lr"]
 
-            print(f"check E_nu_list after optimizer update: {self.E_nu_list[0].item()}, {self.E_nu_list[1].item()}")
-            pdb.set_trace()
+            # print(f"check E_nu_list after optimizer update: {self.E_nu_list[0].item()}, {self.E_nu_list[1].item()}")
+            # pdb.set_trace()
 
             if do_velo_opt:
                 assert self.velo_optimizer is not None
@@ -1898,7 +1904,7 @@ class Trainer:
         # 2025-02-23: change the clean points to a downsampled ply and filtered out the points that are too far away due to downsampling process
         # clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered.ply")
         # 2025-04-04: use a ply with smaller number of points to avoid OOM issue
-        clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered_2500.ply")
+        clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered_1000.ply")
 
         if os.path.exists(clean_points_path):
             clean_xyzs = pcu.load_mesh_v(clean_points_path)
