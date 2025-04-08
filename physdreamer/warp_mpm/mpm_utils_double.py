@@ -1126,7 +1126,7 @@ def set_F_C_g2p(state: MPMStateStruct, model: MPMModelStruct):
                         continue
                     if iz < 0 or iz >= model.n_grid:
                         continue
-                    
+
                     dpos = wp.vec3d(wp.float64(i), wp.float64(j), wp.float64(k)) - fx
                     weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                     grid_v = state.grid_v_out[ix, iy, iz]
@@ -1310,6 +1310,28 @@ def compute_grid_vout_loss_with_grad(
 
     # Accumulate the loss gradient contribution
     wp.atomic_add(loss, 0, grid_v_loss)
+
+
+@wp.kernel
+def compute_px_loss_with_grad(
+    mpm_state: MPMStateStruct,  
+    grad_px_wp: wp.array(dtype=wp.vec3d),  
+    scale: wp.float64,  
+    loss: wp.array(dtype=wp.float64)
+):
+    """
+    Compute how grid velocity `grid_v_in` contributes to the loss gradient.
+    """
+    p = wp.tid()
+
+    # Fetch the current grid velocity
+    px_tensor = mpm_state.particle_x[p]
+
+    # Compute how grid velocity affects loss
+    px_loss = wp.dot(px_tensor, grad_px_wp[p]) * scale
+
+    # Accumulate the loss gradient contribution
+    wp.atomic_add(loss, 0, px_loss)
 
 
 # create another kernel just to sum up all elememts. check if that matches with loss computation with gradient

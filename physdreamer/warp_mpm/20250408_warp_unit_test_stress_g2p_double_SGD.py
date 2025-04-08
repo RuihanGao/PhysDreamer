@@ -31,7 +31,7 @@ os.makedirs(log_dir, exist_ok=True)
 
 loss_scaling = 1
 loss_type = 2
-
+LOSS_ON_POS = False
 
 # define a warp kernel to scale up the loss
 @wp.kernel
@@ -127,12 +127,6 @@ class SimulationInterface(autograd.Function):
                 device=device,
             )
 
-            # print(f"check particle_mass, should be all non-negative")
-            # particle_mass = wp.to_torch(mpm_state.particle_mass).detach().clone()
-            # print(f"particle_mass min {particle_mass.min()}, max {particle_mass.max()}, number of non-zero elements {torch.count_nonzero(particle_mass)}") # min 7.811038813088089, max 7.811038813088089, 10
-            # mass_mask = torch.where(particle_mass > 0, torch.ones_like(particle_mass), torch.zeros_like(particle_mass))
-            # print(mass_mask) # all ones
-
             grid_m = wp.to_torch(mpm_state.grid_m).detach().clone()
             print(f"Before apic, grid_m min {grid_m.min()}, max {grid_m.max()}")
    
@@ -153,9 +147,6 @@ class SimulationInterface(autograd.Function):
                 device=device,
             )
 
-            grid_v_in_tensor = wp.to_torch(mpm_state.grid_v_in).detach().clone()
-
-            # 20250407 Add kernel "grid_normalization_and_gravity"
             wp.launch(
                 kernel=grid_normalization_and_gravity,
                 dim=(grid_size),
@@ -163,43 +154,56 @@ class SimulationInterface(autograd.Function):
                 device=device,
             )
 
-            
+            # 20250408 Add kernel "g2p_differentiable"
+            next_state = mpm_state.partial_clone(requires_grad=requires_grad)
+            wp.launch(
+                kernel=g2p_differentiable,
+                dim=n_particles,
+                inputs=[mpm_state, next_state, mpm_model, dt],
+                device=device,
+            )
 
         ctx.mpm_state = mpm_state
         ctx.mpm_model = mpm_model
+        ctx.next_state = next_state
         ctx.tape = wp_tape
         ctx.dt = dt
         ctx.n_particles = n_particles
         # ctx.save_for_backward(particle_stress)
 
-        # Return grid_v_out for loss computation
-        grid_v_out_torch = wp.to_torch(mpm_state.grid_v_out).detach().clone()
+        # Return new_state.particle_x for loss computation
+        if LOSS_ON_POS:
+            particle_out_torch = wp.to_torch(next_state.particle_x).detach().clone()
+        else:
+            particle_out_torch = wp.to_torch(next_state.particle_v).detach().clone()
 
-        return grid_v_out_torch
+        return particle_out_torch
             
 
     @staticmethod
-    def backward(ctx, out_grid_vin_grad):
+    def backward(ctx, out_particle_x_grad):
         # Retrieve the tape and state objects
         tape = ctx.tape
         mpm_state = ctx.mpm_state
+        next_state = ctx.next_state
         mpm_model = ctx.mpm_model
+        n_particles = ctx.n_particles
 
         # Convert gradients to Warp format
-        out_grid_vin_grad = out_grid_vin_grad.contiguous() # derivative of loss func w.r.t. output grid_v_in, should be all ones. shape [4, 4, 4, 3], dtype float32
-        grad_vin_wp = from_torch_safe(out_grid_vin_grad.to(torch.float64), dtype=wp.vec3d, requires_grad=False)
+        out_particle_x_grad = out_particle_x_grad.contiguous() # derivative of loss func w.r.t. output grid_v_in, should be all ones. shape [4, 4, 4, 3], dtype float32
+        grad_px_wp = from_torch_safe(out_particle_x_grad.to(torch.float64), dtype=wp.vec3d, requires_grad=False)
         grid_size = (mpm_model.grid_dim_x, mpm_model.grid_dim_y, mpm_model.grid_dim_z)
         loss_wp = wp.zeros(1, dtype=wp.float64, device=device, requires_grad=True)
 
         # # TODO: check if we can directly assign the gradient from torch to warp
-        # mpm_state.grid_v_in.grad = grad_vin_wp
+        # mpm_state.grid_v_in.grad = grad_px_wp
         # tape.backward() # NOTE: it doesn't work -> return all zeros
 
         with tape:
             wp.launch(
-                compute_grid_vout_loss_with_grad,
-                dim=grid_size,
-                inputs=[mpm_state, grad_vin_wp, 1.0, loss_wp],
+                compute_px_loss_with_grad,
+                dim=n_particles,
+                inputs=[next_state, grad_px_wp, 1.0, loss_wp],
                 device=device,
             )
       
@@ -434,15 +438,19 @@ if __name__ == "__main__":
     # Clone original stress to perform updates
     particle_stress_sgd = particle_stress.detach().clone().requires_grad_(True)
 
+    print(f"starting state: {sum_grid_vin_torch(init_x)}")
+
+
     # Compute original loss and grad
-    grid_v = SimulationInterface.apply(particle_stress_sgd, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), True)
+    particle_x = SimulationInterface.apply(particle_stress_sgd, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), True)
     if loss_type == 1:
-        loss = sum_grid_vin_torch(grid_v)
+        loss = sum_grid_vin_torch(particle_x)
     elif loss_type == 2:
-        loss = sum_grid_vin_l2_torch(grid_v)
+        loss = sum_grid_vin_l2_torch(particle_x)
 
     loss = loss * loss_scaling
     print(f"Original loss: {loss.item()}")
+
     loss.backward()
     grad = particle_stress_sgd.grad.clone()
     print(f"Gradient of loss w.r.t. particle_stress: \n{grad}")
@@ -461,18 +469,18 @@ if __name__ == "__main__":
 
 
     # Perform SGD update
-    lr = 1e-1  # You can tune this
+    lr = 1e3  # You can tune this
     particle_stress_updated = particle_stress_sgd - lr * grad
     particle_stress_updated = particle_stress_updated.detach().clone().requires_grad_(False)
     # print(f"check particle_stress_updated")
     # print(particle_stress_updated)
 
     # Recompute loss after update
-    new_grid_v = SimulationInterface.apply(particle_stress_updated, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), False)
+    new_particle_x = SimulationInterface.apply(particle_stress_updated, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), False)
     if loss_type == 1:
-        new_loss = sum_grid_vin_torch(new_grid_v)
+        new_loss = sum_grid_vin_torch(new_particle_x)
     elif loss_type == 2:
-        new_loss = sum_grid_vin_l2_torch(new_grid_v)
+        new_loss = sum_grid_vin_l2_torch(new_particle_x)
 
     new_loss = new_loss * loss_scaling
     print(f"New loss after SGD step: {new_loss.item()}")
