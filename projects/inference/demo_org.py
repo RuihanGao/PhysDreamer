@@ -13,36 +13,11 @@ import logging
 import argparse
 import torch
 import os
-parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-print(f"parent_dir: {parent_dir}")
-import sys
-sys.path.append(parent_dir)
-
-
-DATA_TYPE = 1 # 1 for single, 2 for double
-if DATA_TYPE == 1:
-    from physdreamer.warp_mpm.mpm_data_structure import (
-        MPMStateStruct,
-        MPMModelStruct,
-    )
-    from physdreamer.warp_mpm.mpm_solver_diff import MPMWARPDiff
-    torch_dtype = torch.float32
-    numpy_dtype = np.float32
-elif DATA_TYPE == 2:
-    from physdreamer.warp_mpm.mpm_data_structure_double import (
-        MPMStateStruct,
-        MPMModelStruct,
-    )
-    from physdreamer.warp_mpm.mpm_solver_diff_double import MPMWARPDiff
-    torch_dtype = torch.float64
-    numpy_dtype = np.float64
-else:
-    raise ValueError("DATA_TYPE should be 1 or 2")
-
 from physdreamer.utils.config import create_config
 import numpy as np
 
 from physdreamer.gaussian_3d.scene import GaussianModel
+
 from physdreamer.data.datasets.multiview_dataset import MultiviewImageDataset
 from physdreamer.data.datasets.multiview_video_dataset import (
     MultiviewVideoDataset,
@@ -56,11 +31,15 @@ from physdreamer.data.datasets.multiview_dataset import (
 from typing import NamedTuple
 
 from physdreamer.utils.img_utils import compute_psnr, compute_ssim
-
+from physdreamer.warp_mpm.mpm_data_structure import (
+    MPMStateStruct,
+    MPMModelStruct,
+)
+from physdreamer.warp_mpm.mpm_solver_diff import MPMWARPDiff
 from physdreamer.warp_mpm.gaussian_sim_utils import get_volume
 import warp as wp
 
-from physdreamer.local_utils import (
+from local_utils import (
     cycle,
     create_spatial_fields,
     find_far_points,
@@ -74,8 +53,6 @@ from physdreamer.local_utils import (
 )
 from config_demo import DemoParams
 from physdreamer.utils.io_utils import save_video_mediapy
-from physdreamer.gaussian_3d.gaussian_renderer.feat_render import render_feat_gaussian
-import pdb
 
 
 logger = get_logger(__name__, log_level="INFO")
@@ -135,22 +112,17 @@ class Trainer:
         logger.info(accelerator.state, main_process_only=False)
 
         set_seed(args.seed + accelerator.process_index)
-        print(f"check seed {args.seed} + {accelerator.process_index}")
 
         demo_cfg = DemoParams(args.scene_name).get_cfg(
             args.demo_name,
             args.model_id,
             args.eval_ys,
-            force_id=args.force_id,
-            force_mag=args.force_mag,
-            force_duration=args.force_duration,
-            force_radius=args.force_radius,
-            velo_scaling=args.velo_scaling,
-            point_id=args.point_id,
-            cam_id=args.cam_id,
-            apply_force=args.apply_force,
-            hide_force=args.hide_force,
-            postfix=args.postfix,
+            args.force_id,
+            args.force_mag,
+            args.velo_scaling,
+            args.point_id,
+            args.cam_id,
+            args.apply_force,
         )
         self.args.dataset_dir = demo_cfg["dataset_dir"]
         self.demo_cfg = demo_cfg
@@ -190,7 +162,7 @@ class Trainer:
         self.accelerator = accelerator
 
         # init traiable params
-        E_nu_list = self.init_trainable_params(poisson_numpy=0.3)
+        E_nu_list = self.init_trainable_params()
         for p in E_nu_list:
             p.requires_grad = False
         self.E_nu_list = E_nu_list
@@ -201,28 +173,22 @@ class Trainer:
         if args.checkpoint_path == "None":
             args.checkpoint_path = None
         if args.checkpoint_path is not None:
-            print("=> loading checkpoint from: ", args.checkpoint_path)
             self.load(args.checkpoint_path)
         self.sim_fields, self.velo_fields = accelerator.prepare(
             self.sim_fields, self.velo_fields
         )
-        self.hide_force = args.hide_force # option to hide force rendering to generate driving video for training
-        self.impulse_mode = args.impulse_mode # option to easily switch applying impulse force to particle or grid
-        
 
     def init_trainable_params(
         self,
-        poisson_numpy=None,
     ):
         # init young modulus and poisson ratio
         # from pre-optimized;  gres32 step 128.  300 epoch. lr 10.0  psnr: 27.72028086735652.  Stop at 100epoch
-        young_numpy = np.array([self.demo_cfg["init_youngs"]]).astype(numpy_dtype)
-        young_modulus = torch.tensor(young_numpy, dtype=torch_dtype).to(
+        young_numpy = np.array([self.demo_cfg["init_youngs"]]).astype(np.float32)
+        young_modulus = torch.tensor(young_numpy, dtype=torch.float32).to(
             self.accelerator.device
         )
-
-        poisson_numpy = np.random.uniform(0.1, 0.4) if poisson_numpy is None else poisson_numpy
-        poisson_ratio = torch.tensor(poisson_numpy, dtype=torch_dtype).to(
+        poisson_numpy = np.random.uniform(0.1, 0.4)
+        poisson_ratio = torch.tensor(poisson_numpy, dtype=torch.float32).to(
             self.accelerator.device
         )
         trainable_params = [young_modulus, poisson_ratio]
@@ -251,7 +217,7 @@ class Trainer:
         pos_min = sim_xyzs.min()
         scale = (pos_max - pos_min) * 1.8
         shift = -pos_min + (pos_max - pos_min) * 0.25
-        
+        self.scale, self.shift = scale, shift
         print("scale, shift", scale, shift)
 
         # load internal filled points.
@@ -284,10 +250,7 @@ class Trainer:
             self.fill_xyzs = None
             self.render_mask = torch.ones_like(sim_xyzs[:, 0]).bool().to(device)
 
-        sim_xyzs = (sim_xyzs + shift) / scale # range [0.1388889104127884, 0.694444477558136]
-        print(f"check sim_xyzs before downsampling: {sim_xyzs.shape}")
-        print(f"check sim_syzs range: {sim_xyzs.min()}, {sim_xyzs.max()}")
-        # pdb.set_trace()
+        sim_xyzs = (sim_xyzs + shift) / scale
         sim_aabb = torch.stack(
             [torch.min(sim_xyzs, dim=0)[0], torch.max(sim_xyzs, dim=0)[0]], dim=0
         )
@@ -297,8 +260,6 @@ class Trainer:
         ) * 1.2 + torch.mean(sim_aabb, dim=0, keepdim=True)
 
         print("simulation aabb: ", sim_aabb)
-
-        # self.downsample_shift = 0.05
 
         # point cloud resample with kmeans
         if "downsample_scale" in self.demo_cfg:
@@ -312,50 +273,24 @@ class Trainer:
             # WARNING: this is a GPU implementation, and will be OOM if the number of points is large
             # you might want to use a CPU implementation if the number of points is large
             # For CPU implementation: uncomment the following lines
-            # from physdreamer.local_utils import downsample_with_kmeans
+            # from local_utils import downsample_with_kmeans
             # sim_xyzs = downsample_with_kmeans(sim_xyzs.detach().cpu().numpy(), num_cluster)
             # sim_xyzs = torch.from_numpy(sim_xyzs).float().to(device)
 
             sim_xyzs = downsample_with_kmeans_gpu(sim_xyzs, num_cluster)
-            print(f"after downsampling, before downsample_shift, check sim_xyzs range: {sim_xyzs.min()}, {sim_xyzs.max()}, shape {sim_xyzs.shape}")
-            # after downsampling, before downsample_shift, check sim_xyzs range: 0.0, 0.6937066316604614, shape torch.Size([5288, 3])
 
-            # # save the downsampled points for visualization
-            # downsampled_points_path = os.path.join(dataset_dir, "downsampled_points_demo.npy")
-            # downsampled_points = sim_xyzs.clone().detach().cpu().numpy()
-            # np.save(downsampled_points_path, downsampled_points)
-            # print(f"Save downsampled points to {downsampled_points_path}")
-            # from pytorch3d.io import save_ply
-            # save_ply(downsampled_points_path.replace(".npy", ".ply"), verts=torch.from_numpy(downsampled_points))
-            # pdb.set_trace()
+            sim_gaussian_pos = self.render_params.gaussians.get_xyz.detach().clone()[
+                self.sim_mask_in_raw_gaussian, :
+            ]
+            sim_gaussian_pos = (sim_gaussian_pos + shift) / scale
 
-            # sim_xyzs = (sim_xyzs + self.downsample_shift) / scale
-            # shift += self.downsample_shift
-            # print(f"after downsampling, after downsample_shift, check sim_xyzs range: {sim_xyzs.min()}, {sim_xyzs.max()}")
+            # record top k index for each point, to interpolate positions and rotations later
+            cdist = torch.cdist(sim_gaussian_pos, sim_xyzs) * -1.0
+            _, top_k_index = torch.topk(cdist, self.args.top_k, dim=-1)
+            self.top_k_index = top_k_index
 
+            print("Downsampled to: ", sim_xyzs.shape[0], "by", downsample_scale)
 
-        else:
-            # without downsampling, use the filtered clean points as the simulation points
-            print(f"Use the filtered clean points as the simulation points")
-            sim_xyzs = self.clean_xyzs.clone()
-            sim_xyzs = (sim_xyzs + shift) / scale
-            print(f"check sim_xyzs range: {sim_xyzs.min()}, {sim_xyzs.max()}, shape {sim_xyzs.shape}")
-            # check sim_xyzs range: 0.14057305455207825, 0.6914111971855164, shape torch.Size([5337, 3])
-
-            
-        sim_gaussian_pos = self.render_params.gaussians.get_xyz.detach().clone()[
-            self.sim_mask_in_raw_gaussian, :
-        ].to(torch_dtype)
-        sim_gaussian_pos = (sim_gaussian_pos + shift) / scale
-
-        # record top k index for each point, to interpolate positions and rotations later
-        cdist = torch.cdist(sim_gaussian_pos, sim_xyzs) * -1.0
-        _, top_k_index = torch.topk(cdist, self.args.top_k, dim=-1)
-        self.top_k_index = top_k_index
-
-        print("Downsampled to: ", sim_xyzs.shape[0], "by", downsample_scale)         
-
-        self.scale, self.shift = scale, shift
         # Compute the volume of each particle
         points_volume = get_volume(sim_xyzs.detach().cpu().numpy())
 
@@ -375,14 +310,11 @@ class Trainer:
         mpm_state = MPMStateStruct()
         mpm_state.init(num_particles, device=device, requires_grad=False)
 
-        self.particle_init_position = sim_xyzs.clone() # range [0.0, 0.6929837465286255]
- 
-        print(f"check particle_init_position: {self.particle_init_position.shape}")
-        print(f"check particle_init_position range: {self.particle_init_position.min()}, {self.particle_init_position.max()}")
+        self.particle_init_position = sim_xyzs.clone()
 
         mpm_state.from_torch(
             self.particle_init_position.clone(),
-            torch.from_numpy(points_volume).to(torch_dtype).to(device).clone(),
+            torch.from_numpy(points_volume).float().to(device).clone(),
             None,
             device=device,
             requires_grad=False,
@@ -407,7 +339,6 @@ class Trainer:
         )
         mpm_solver.set_parameters_dict(mpm_model, mpm_state, material_params)
 
-
         self.mpm_state, self.mpm_model, self.mpm_solver = (
             mpm_state,
             mpm_model,
@@ -421,7 +352,7 @@ class Trainer:
         ), "We need to segment out the moving part to initialize the boundary condition"
 
         moving_pts = pcu.load_mesh_v(moving_pts_path)
-        moving_pts = torch.from_numpy(moving_pts).to(torch_dtype).to(device)
+        moving_pts = torch.from_numpy(moving_pts).float().to(device)
         moving_pts = (moving_pts + shift) / scale
         freeze_mask = find_far_points(
             sim_xyzs, moving_pts, thres=0.5 / grid_size
@@ -478,7 +409,7 @@ class Trainer:
         )
         self.velo_fields.train()
 
-    def add_constant_force(self, center_point, radius, force, dt, start_time, end_time, impulse_mode="particle"):
+    def add_constant_force(self, center_point, radius, force, dt, start_time, end_time):
         xyzs = self.particle_init_position.clone() * self.scale - self.shift
 
         device = "cuda:{}".format(self.accelerator.process_index)
@@ -493,7 +424,6 @@ class Trainer:
             start_time,
             end_time,
             device=device,
-            impulse_mode=impulse_mode,
         )
 
     def get_simulation_input(self, device):
@@ -509,19 +439,12 @@ class Trainer:
         """
 
         density, youngs_modulus, ret_poisson = self.get_material_params(device)
-                
-        print(f"check youngs_modulus in get_simulation_input: {youngs_modulus.shape}, range {youngs_modulus.min().item()} - {youngs_modulus.max().item()}") #  1417130.5 - 105582136.0
-
         initial_position_time0 = self.particle_init_position.clone()
 
         query_mask = torch.logical_not(self.freeze_mask)
         query_pts = initial_position_time0[query_mask, :]
 
-        # velocity = self.velo_fields(query_pts)[..., :3]
-        self.velo_fields = self.velo_fields.float()
-        velocity = self.velo_fields(query_pts.float()).to(torch_dtype) # uses float data type for the network
-        velocity = velocity[..., :3]
-        print(f"check velocity in get_simulation_input: {velocity.shape}, range {velocity.min().item()} - {velocity.max().item()}") #  -0.02443808503448963 - 0.023882806301116943
+        velocity = self.velo_fields(query_pts)[..., :3]
 
         # scaling lr is similar to scaling the learning rate of velocity fields.
         velocity = velocity * 0.1  # not padded yet
@@ -529,7 +452,7 @@ class Trainer:
         ret_velocity[query_mask, :] = velocity
 
         # init F as Idensity Matrix, and C and Zero Matrix
-        I_mat = torch.eye(3, dtype=torch_dtype).to(device)
+        I_mat = torch.eye(3, dtype=torch.float32).to(device)
         particle_F = torch.repeat_interleave(
             I_mat[None, ...], initial_position_time0.shape[0], dim=0
         )
@@ -558,20 +481,12 @@ class Trainer:
         # query the materials params of all particles
         query_pts = initial_position_time0
 
-        # sim_params = self.sim_fields(query_pts)
-        self.sim_fields = self.sim_fields.float()
-        sim_params = self.sim_fields(query_pts.float()).to(torch_dtype) # uses float data type for the network
+        sim_params = self.sim_fields(query_pts)
 
         # scale the output of the network, similar to scale the learning rate
         sim_params = sim_params * 1000
         youngs_modulus = self.young_modulus.detach().clone()
         youngs_modulus += sim_params[..., 0]
-
-        # print(f"check youngs_modulus in get_material_params: \n self.young_modulus min {self.young_modulus.min()}, max {self.young_modulus.max()}, \n sim_params shape {sim_params.shape}, min {sim_params[..., 0].min()}, max {sim_params[..., 0].max()} \n youngs_modulus min {youngs_modulus.min()}, max {youngs_modulus.max()}") 
-        # self.young_modulus min 2140628.25, max 2140628.25, 
-        # sim_params shape torch.Size([13356, 1]), min -723497.6875, max 103441504.0 
-        # youngs_modulus min 1417130.5, max 105582136.0
-
 
         # clamp youngs modulus
         youngs_modulus = torch.clamp(youngs_modulus, 1.0, 5e8)
@@ -643,11 +558,7 @@ class Trainer:
         #    we will track foreground points with mask: self.sim_mask_in_raw_gaussian
         gaussian_dir = os.path.dirname(gaussian_path)
 
-        # clean_points_path = os.path.join(gaussian_dir, "clean_object_points.ply")
-        # 2025-02-23: change the clean points to a downsampled ply and filtered out the points that are too far away due to downsampling process
-        # clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered.ply")
-        # 2025-04-04: use a ply with smaller number of points to avoid OOM issue
-        clean_points_path = os.path.join(gaussian_dir, "clean_downsampled_points_filtered_1000.ply")
+        clean_points_path = os.path.join(gaussian_dir, "clean_object_points.ply")
 
         assert os.path.exists(
             clean_points_path
@@ -655,7 +566,7 @@ class Trainer:
 
         clean_xyzs = pcu.load_mesh_v(clean_points_path)
         clean_xyzs = torch.from_numpy(clean_xyzs).float().to("cuda")
-        self.clean_xyzs = clean_xyzs.to(torch_dtype)
+        self.clean_xyzs = clean_xyzs
         print(
             "loaded {} clean points from: ".format(clean_xyzs.shape[0]),
             clean_points_path,
@@ -718,64 +629,12 @@ class Trainer:
         ) = self.get_simulation_input(device)
 
         poisson = self.E_nu_list[1].detach().clone()  # override poisson
-        # print(f"check poisson: {poisson.shape}")  # [], 0.2646
-        # print(f"check trainer.poison_ratio: {self.poisson_ratio.shape}") # [13356], uniformly 0.3
-        # print(f"check youngs_modulus: {youngs_modulus_.shape}") # [13356], loaded from material field, nonuniform
-        # print(f"check eval_ys: {eval_ys}")
-        # pdb.set_trace()
 
         if eval_ys < 10:
             youngs_modulus = youngs_modulus_
         else:
             # assign eval_ys to all particles
             youngs_modulus = torch.ones_like(youngs_modulus_) * eval_ys
-
-        print(f"check pretrained material and velocity fields")
-        print(f"check youngs_modulus: {youngs_modulus.shape} range {youngs_modulus.min()}, {youngs_modulus.max()}") # shape [13356, ], range 1417130.5, 105582136.0
-        print(f"check poissons: {poisson.shape} range {poisson.min()}, {poisson.max()}") # shape [13356], range 0.2646, 0.2646
-        print(f"check init_velocity: {init_velocity.shape} range {init_velocity.min()}, {init_velocity.max()}") # shape [13356, 3], range -0.02443808503448963, 0.023882806301116943
-        print(f"vx range: {init_velocity[:, 0].min()}, {init_velocity[:, 0].max()}, vy range: {init_velocity[:, 1].min()}, {init_velocity[:, 1].max()}, vz range: {init_velocity[:, 2].min()}, {init_velocity[:, 2].max()}") 
-        # vx range: -0.24438084661960602, -0.1958092898130417, vy range: 0.19218483567237854, 0.23882806301116943, vz range: -0.15181176364421844, -0.12185412645339966
-
-        # add visualization of youngs_modulus (modified from train_material.py)
-        youngs_norm = youngs_modulus - youngs_modulus.min() + 1e-2
-        young_color = youngs_norm / torch.quantile(youngs_norm, 0.99)
-        young_color = torch.clamp(young_color, 0.0, 1.0)
-        young_color[self.freeze_mask] = 0.0
-        queryed_young_color = young_color[self.top_k_index]  # [n_raw, topk]
-        young_color = queryed_young_color.mean(dim=-1)
-
-        young_color_full = torch.ones_like(
-            self.render_params.gaussians._xyz[:, 0]
-        )
-
-        young_color_full[self.sim_mask_in_raw_gaussian] = young_color.to(torch.float32)
-        young_color = torch.stack(
-            [young_color_full, young_color_full, young_color_full], dim=-1
-        )
-
-        young_img = render_feat_gaussian(
-            cam,
-            self.render_params.gaussians,
-            self.render_params.render_pipe,
-            self.render_params.bg_color,
-            young_color,
-        )["render"]
-        young_img = (
-            (young_img.detach().cpu().numpy() * 255.0)
-            .astype(np.uint8)
-            .transpose(1, 2, 0)
-        )
-        # save the image
-        young_img_path = os.path.join(result_dir, save_name + "_youngs.png")
-        from PIL import Image
-        young_im = Image.fromarray(young_img)
-        young_im.save(young_img_path)
-        # save the raw value of youngs_modulus as npy
-        youngs_modulus_path = os.path.join(result_dir, save_name + "_youngs.npy")
-        youngs_modulus_np = youngs_modulus.detach().cpu().numpy()
-        np.save(youngs_modulus_path, youngs_modulus_np)
-        print(f"Save youngs_modulus to {youngs_modulus_path}")
 
         # step-1 Setup simulation parameters. External force, or initial velocity.
         #   if --apply_force, we will apply a constant force to points close to the force center
@@ -802,9 +661,8 @@ class Trainer:
             # apply force to points within the radius of the center point
             force_radius = self.demo_cfg["force_radius"]
 
-            print(f"In demo, add constant force for {force_duration} sec, delta_time {delta_time}, force_radius {force_radius}, force {force}")
             self.add_constant_force(
-                center_point, force_radius, force, delta_time, 0.0, force_duration, self.impulse_mode
+                center_point, force_radius, force, delta_time, 0.0, force_duration
             )
 
             # prepare to render force in simulated videos:
@@ -841,26 +699,9 @@ class Trainer:
             # record drive points sequence
             render_pos_list = [(init_xyzs.clone() * self.scale) - self.shift]
             prev_state = self.mpm_state
-            # 2025-02-09 Save particle_v for debugging
-            particle_v_list = []
-            grid_v_in_list = []
-            grid_v_out_list = []
             for i in tqdm(range(int((30) * num_sec))):
                 # iterate over substeps for each frame
                 for substep_local in range(num_substeps):
-                    particle_v_list.append(wp.to_torch(prev_state.particle_v).clone().detach().cpu().numpy())
-                    if np.isnan(prev_state.particle_v.numpy()).any():
-                        print(f"nan in particle_v at frame {i}, substep {substep_local}")
-                        pdb.set_trace()
-                    else:
-                        # print(f"check particle_v range: {prev_state.particle_v.numpy().min()}, {prev_state.particle_v.numpy().max()}")
-                        pass
-                    
-                    if i < 1 and substep_local < 5:
-                        # if we save all 90 frames, will be OOM
-                        grid_v_in_list.append(wp.to_torch(prev_state.grid_v_in).clone().detach().cpu().numpy())
-                        grid_v_out_list.append(wp.to_torch(prev_state.grid_v_out).clone().detach().cpu().numpy())
-
                     next_state = prev_state.partial_clone(requires_grad=False)
                     self.mpm_solver.p2g2p_differentiable(
                         self.mpm_model,
@@ -868,9 +709,6 @@ class Trainer:
                         next_state,
                         substep_size,
                         device=device,
-                        i=i, 
-                        substep_local=substep_local,
-                        pos_path=pos_path,
                     )
                     prev_state = next_state
 
@@ -881,7 +719,6 @@ class Trainer:
 
             # save the sequence of drive points
             numpy_pos = torch.stack(render_pos_list, dim=0).detach().cpu().numpy()
-            print(f"save pos to {pos_path}, check shape {numpy_pos.shape}")
             np.save(pos_path, numpy_pos)
         else:
             render_pos_list = []
@@ -890,16 +727,8 @@ class Trainer:
                 render_pos_list.append(torch.from_numpy(pos).to(device))
 
         num_pos = len(render_pos_list)
-        init_pos = render_pos_list[0].clone().float()
-        pos_diff_list = [(_).float() - init_pos for _ in render_pos_list]
-        
-        # print(f"check pos_diff_list: {len(pos_diff_list)}")
-        # pos_diff_list_arr = torch.stack(pos_diff_list).detach().cpu().numpy()
-        # pos_diff_path = pos_path.replace("_pos.npy", "_pos_diff.npy")
-        # np.save(pos_diff_path, pos_diff_list_arr)
-        # nonzero_idx = np.nonzero(pos_diff_list_arr)
-        # len(nonzero_idx[1])/3 # 70830.0 for grid 809698.3333333334 for particle
-        # pdb.set_trace()
+        init_pos = render_pos_list[0].clone()
+        pos_diff_list = [_ - init_pos for _ in render_pos_list]
 
         if not static_camera:
             interpolated_cameras = get_camera_trajectory(
@@ -937,7 +766,6 @@ class Trainer:
                 closest_idx,
                 render_force,
                 force_duration_steps,
-                hide_force=self.hide_force
             )
             video_numpy = np.transpose(video_numpy, [0, 2, 3, 1])
 
@@ -948,7 +776,7 @@ class Trainer:
                 + "_camid_{}".format(self.demo_cfg["cam_id"])
             )
 
-        # save_name = save_name + "_" + self.demo_cfg["name"]
+        save_name = save_name + "_" + self.demo_cfg["name"]
         save_path = os.path.join(result_dir, save_name + ".mp4")
 
         print("save video to ", save_path)
@@ -1094,18 +922,11 @@ def parse_args():
     parser.add_argument("--eval_ys", type=float, default=1.0)
     parser.add_argument("--force_id", type=int, default=1)
     parser.add_argument("--force_mag", type=float, default=1.0)
-    parser.add_argument("--force_radius", type=float, default=0.1)
-    parser.add_argument("--force_duration", type=float, default=0.75)
     parser.add_argument("--velo_scaling", type=float, default=5.0)
     parser.add_argument("--point_id", type=int, default=0)
     parser.add_argument("--apply_force", action="store_true", default=False)
     parser.add_argument("--cam_id", type=int, default=0)
     parser.add_argument("--static_camera", action="store_true", default=False)
-    parser.add_argument("--hide_force", action="store_true", default=False)
-    parser.add_argument("--postfix", type=str, default="")
-    parser.add_argument("--impulse_mode", type=str, default="particle")
-    parser.add_argument("--entropy_cls", type=int, default=-1) # add the argument to be consistent with the training script
-   
 
     args, extra_args = parser.parse_known_args()
 
@@ -1124,5 +945,3 @@ if __name__ == "__main__":
         apply_force=args.apply_force,
         save_name=args.demo_name,
     )
-
-
