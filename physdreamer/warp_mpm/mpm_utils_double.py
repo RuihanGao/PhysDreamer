@@ -12,7 +12,7 @@ def kirchoff_stress_FCR(
     # compute kirchoff stress for FCR model (remember tau = P F^T)
     R = U * wp.transpose(V)
     id =wp.mat33d(wp.float64(1.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(1.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(1.0))
-    return wp.float64(2.0) * mu * (F - R) * wp.transpose(F) + id * lam * J * (J - wp.float64(0.0))
+    return wp.float64(2.0) * mu * (F - R) * wp.transpose(F) + id * lam * J * (J - wp.float64(1.0))
 
 
 @wp.func

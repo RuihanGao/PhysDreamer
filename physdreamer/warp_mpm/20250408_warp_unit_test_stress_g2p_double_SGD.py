@@ -212,6 +212,11 @@ class SimulationInterface(autograd.Function):
         
         stress_grad_wp = mpm_state.particle_stress.grad
         stress_grad_torch = wp.to_torch(stress_grad_wp).detach().clone()
+
+        output_path = osp.join(log_dir, "stress_tensor.npz")
+        np.savez(output_path, stress_grad=stress_grad_torch.detach().cpu().numpy(), stress=mpm_state.particle_stress.numpy())
+
+        pdb.set_trace()
         ctx.tape.zero()
 
         return stress_grad_torch, None, None, None, None, None  # No gradients for init_x, init_v, init_volume, init_cov

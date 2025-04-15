@@ -195,7 +195,6 @@ class Trainer:
         # # 2025-04-08 temporary change logging_dir to args.output_dir to avoid too long file name when we run for different initE
         # logging_dir = args.output_dir
 
-
         accelerator_project_config = ProjectConfiguration(logging_dir=logging_dir)
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         accelerator = Accelerator(
@@ -582,7 +581,7 @@ class Trainer:
         if self.args.downsample_scale < 1:
             num_cluster = int(sim_xyzs.shape[0] * downsample_scale)
             print(f"Before downsample: {sim_xyzs.shape[0]}, num_cluster: {num_cluster}")
-            sim_xyzs = downsample_with_kmeans_gpu(sim_xyzs, num_cluster) # downsample the simulated particles for faster simulation
+            sim_xyzs = downsample_with_kmeans_gpu(sim_xyzs, num_cluster).to(torch_dtype) # downsample the simulated particles for faster simulation
 
             # # save the downsampled points for visualization
             # downsampled_points_path = os.path.join(dataset_dir, "downsampled_points_train.npy")
@@ -1335,23 +1334,25 @@ class Trainer:
                 error_if_nonfinite=False,
             )  # error if nonfinite is false
 
-            # # save visual_video and gt_video as .mp4
-            # print(f"save visual_video and gt_video as .mp4, shape ", visual_video.shape, gt_video.shape) #[6, 3, 576, 1024], [13, 3 ,576, 1024]
-            # visual_video_path = os.path.join(self.output_path, f"rendered_video_{self.step:06d}.mp4")
-            # save_video_imageio(visual_video_path, visual_video.transpose(0, 2, 3, 1), fps=30)
-            # gt_video_path = os.path.join(self.output_path, f"gt_video_{self.step:06d}.mp4")
-            # save_video_imageio(gt_video_path, gt_video.transpose(0, 2, 3, 1), fps=30)
+            # save visual_video and gt_video as .mp4
+            print(f"save visual_video and gt_video as .mp4, shape ", visual_video.shape, gt_video.shape) #[6, 3, 576, 1024], [13, 3 ,576, 1024]
+            visual_video_path = os.path.join(self.output_path, f"rendered_video_{self.step:06d}.mp4")
+            save_video_imageio(visual_video_path, visual_video.transpose(0, 2, 3, 1), fps=30)
+            gt_video_path = os.path.join(self.output_path, f"gt_video_{self.step:06d}.mp4")
+            save_video_imageio(gt_video_path, gt_video.transpose(0, 2, 3, 1), fps=30)
+
             # if self.apply_force:
             #     visual_video_w_force_path = os.path.join(self.output_path, f"rendered_video_w_force_{self.step:06d}.mp4")
             #     save_video_imageio(visual_video_w_force_path, visual_video_w_force.transpose(0, 2, 3, 1), fps=30)
 
-            # save per frame as .png
-            for i in range(visual_video.shape[0]):
-                visual_frame_path = os.path.join(self.output_path, f"visual_frame_{self.step:06d}_{i:02d}.png")
-                imageio.imwrite(visual_frame_path, visual_video[i].transpose(1, 2, 0))
-            for i in range(gt_video.shape[0]):
-                gt_frame_path = os.path.join(self.output_path, f"gt_frame_{self.step:06d}_{i:02d}.png")
-                imageio.imwrite(gt_frame_path, gt_video[i].transpose(1, 2, 0))
+            # # save per frame as .png
+            # for i in range(visual_video.shape[0]):
+            #     visual_frame_path = os.path.join(self.output_path, f"visual_frame_{self.step:06d}_{i:02d}.png")
+            #     imageio.imwrite(visual_frame_path, visual_video[i].transpose(1, 2, 0))
+            # for i in range(gt_video.shape[0]):
+            #     gt_frame_path = os.path.join(self.output_path, f"gt_frame_{self.step:06d}_{i:02d}.png")
+            #     imageio.imwrite(gt_frame_path, gt_video[i].transpose(1, 2, 0))
+
             # if self.apply_force:
             #     for i in range(visual_video_w_force.shape[0]):
             #         visual_frame_w_force_path = os.path.join(self.output_path, f"visual_frame_w_force_{self.step:06d}_{i:02d}.png")
@@ -1516,7 +1517,7 @@ class Trainer:
                     wandb.log(wandb_dict, step=self.step)
 
         self.accelerator.wait_for_everyone()
-        return pos_L2_loss, E_grad 
+        return pos_L2_loss, E_grad.item()
         # print(f"check result for step {self.step}")
         # pdb.set_trace()
 
@@ -2054,17 +2055,18 @@ if __name__ == "__main__":
 
 
     # # 2025-04-08 Draw loss plot for gradient debugging
+    # # when you run multiple initE, change logging_dir to avoid long file name
     # initE_list = []
     # pos_l2_loss_list = []
     # E_grad_list = []
-    # for initE in np.arange(0.46, 0.6, 0.01):
+    # for initE in np.arange(0.41, 0.45, 0.01):
     #     args.initE = float(initE)
     #     trainer = Trainer(args)
     #     pos_l2_loss, E_grad = trainer.train_one_step()
     #     print(f"initE {initE}: pos_l2_loss {pos_l2_loss}, {type(pos_l2_loss)}, E_grad {E_grad}, {type(E_grad)}, ")
     #     initE_list.append(initE)
     #     pos_l2_loss_list.append(pos_l2_loss.item())
-    #     E_grad_list.append(E_grad.item())
+    #     E_grad_list.append(E_grad)
     #     pdb.set_trace()
 
     #     # clear the cache

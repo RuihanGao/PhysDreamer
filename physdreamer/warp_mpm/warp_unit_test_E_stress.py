@@ -1,10 +1,11 @@
 import warp as wp
 import torch
 import numpy as np
-from mpm_solver_diff import MPMWARPDiff
-from mpm_data_structure import MPMStateStruct, MPMModelStruct
+
 from warp_utils import MyTape, from_torch_safe, CondTape
 from mpm_utils import * 
+from mpm_solver_diff import MPMWARPDiff
+from mpm_data_structure import MPMStateStruct, MPMModelStruct
 from run_gaussian_static import load_gaussians, get_volume
 import torch.autograd as autograd
 import pdb
@@ -20,6 +21,9 @@ Returns:
     _type_: _description_
 """
 
+def sum_stress_l2_torch(stress_tensor):
+    return (stress_tensor ** 2).sum()
+
 @wp.kernel
 def compute_loss_kernel_vec3(particle_x: wp.array(dtype=wp.vec3), loss: wp.array(dtype=float)):
     tid = wp.tid()
@@ -34,7 +38,7 @@ def compute_loss_kernel_mat33(particle_stress: wp.array(dtype=wp.mat33), loss: w
 
 class SimulationInterface(autograd.Function):
     @staticmethod
-    def forward(ctx, E_tensor, init_x, init_v, init_volume, init_cov):
+    def forward(ctx, E_tensor, init_x, init_v, init_volume, init_cov, requires_grad=True):
         """
         Forward simulation using the **same** init_x and init_v.
         """
@@ -45,7 +49,7 @@ class SimulationInterface(autograd.Function):
 
         # Reinitialize MPM state, model, solver
         mpm_state = MPMStateStruct()
-        mpm_state.init(n_particles, device=device, requires_grad=True)
+        mpm_state.init(n_particles, device=device, requires_grad=requires_grad)
         # from_torch function contains init_grid and initializes particle_F_trial to identity
         mpm_state.from_torch(
             init_x,
@@ -53,27 +57,27 @@ class SimulationInterface(autograd.Function):
             init_cov,
             init_v,
             device=device,
-            requires_grad=True,
+            requires_grad=requires_grad,
             n_grid=n_grid,
             grid_lim=grid_lim,
         )
 
         next_state = MPMStateStruct()
-        next_state.init(n_particles, device=device, requires_grad=True)
+        next_state.init(n_particles, device=device, requires_grad=requires_grad)
         next_state.from_torch(
             init_x,
             init_volume,
             init_cov,
             init_v,
             device=device,
-            requires_grad=True,
+            requires_grad=requires_grad,
             n_grid=n_grid,
             grid_lim=1.0,
         )
 
 
         mpm_model = MPMModelStruct()
-        mpm_model.init(n_particles, device=device, requires_grad=True)
+        mpm_model.init(n_particles, device=device, requires_grad=requires_grad)
         mpm_model.init_other_params(n_grid=n_grid, grid_lim=grid_lim, device=device)
 
         grid_size = (
@@ -82,8 +86,7 @@ class SimulationInterface(autograd.Function):
             mpm_model.grid_dim_z,
         )
 
-        # Initialize model parameters
-        nu_tensor = torch.ones(n_particles, dtype=torch.float32, device=device) * 0.3
+        
 
 
         solver = MPMWARPDiff(n_particles, n_grid, grid_lim, device=device)
@@ -99,7 +102,8 @@ class SimulationInterface(autograd.Function):
         density_tensor = torch.ones(n_particles, dtype=torch.float32, device=device) * material_params["density"]
         mpm_state.reset_density(density_tensor.clone(), device=device, update_mass=True)
         next_state.reset_density(density_tensor.clone(), device=device, update_mass=True)
-
+        # Initialize model parameters
+        nu_tensor = torch.ones(n_particles, dtype=torch.float32, device=device) * 0.3
         solver.set_E_nu_from_torch(mpm_model, E_tensor, nu_tensor, device=device)
         # solver.prepare_mu_lam(mpm_model, mpm_state, device) # move inside the tape to obtain correct gradient for E
 
@@ -222,8 +226,8 @@ def check_autodiff(E_tensor, init_x, init_v, init_volume, init_cov, eps=1e-6):
     outputs0 = SimulationInterface.apply(E0, init_x, init_v, init_volume, init_cov)
     outputs1 = SimulationInterface.apply(E1, init_x, init_v, init_volume, init_cov)
 
-    # save output stress tensor to file
-    np.savez("example_stress_tensor.npz", outputs0=outputs0.detach().cpu().numpy(), outputs1=outputs1.detach().cpu().numpy(), E0=E0.detach().cpu().numpy(), E1=E1.detach().cpu().numpy(), init_x=init_x.detach().cpu().numpy(), init_v=init_v.detach().cpu().numpy(), init_volume=init_volume.detach().cpu().numpy(), init_cov=init_cov.detach().cpu().numpy())
+    # # save output stress tensor to file
+    # np.savez("example_stress_tensor.npz", outputs0=outputs0.detach().cpu().numpy(), outputs1=outputs1.detach().cpu().numpy(), E0=E0.detach().cpu().numpy(), E1=E1.detach().cpu().numpy(), init_x=init_x.detach().cpu().numpy(), init_v=init_v.detach().cpu().numpy(), init_volume=init_volume.detach().cpu().numpy(), init_cov=init_cov.detach().cpu().numpy())
 
     print(f"outputs0: {type(outputs0)}, shape {outputs0.shape}")
 
@@ -275,9 +279,40 @@ if __name__ == "__main__":
 
     E_tensor = torch.ones(n_particles, dtype=torch.float32, device=device, requires_grad=True) * initE
 
-    # 🔥 Compute Autodiff and Finite Difference Gradient for E
-    grad_error = check_autodiff(E_tensor, init_x, init_v, init_volume, init_cov, eps=10)
+    # # 🔥 Compute Autodiff and Finite Difference Gradient for E
+    # grad_error = check_autodiff(E_tensor, init_x, init_v, init_volume, init_cov, eps=10)
 
-    # 🔥 Compare error
-    assert grad_error < 1e-7, "Gradient check failed!"
-    print("Gradient verification passed!")
+    # # 🔥 Compare error
+    # assert grad_error < 1e-7, "Gradient check failed!"
+    # print("Gradient verification passed!")
+
+    # Perform a single SGD step to verify gradient correctness
+    print("\n###Performing SGD step to reduce loss...###")
+    # Clone original stress to perform updates
+    initE_sgd = torch.tensor(E_tensor, dtype=torch.float64).to(device).detach().clone().requires_grad_(True)
+
+    # Compute original loss and grad
+    stress = SimulationInterface.apply(initE_sgd, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), True)
+    loss = sum_stress_l2_torch(stress)
+    print(f"Original loss: {loss.item()}")
+
+    loss.backward()
+    grad = initE_sgd.grad.clone()
+    print(f"Gradient of loss w.r.t. E: \n{grad}")
+
+    # Perform SGD update
+    lr = 1e5  # You can tune this
+    initE_updated = initE_sgd - lr * grad
+    initE_updated = initE_updated.detach().clone().requires_grad_(False)
+    print(f"check initE_sgd {initE_sgd}, initE_updated {initE_updated}")
+
+    # Recompute loss after update
+    new_stress = SimulationInterface.apply(initE_updated, init_x.detach().clone(), init_v.detach().clone(), init_volume.detach().clone(), init_cov.detach().clone(), False)
+    new_loss = sum_stress_l2_torch(new_stress)
+    print(f"New loss after SGD step: {new_loss.item()}")
+
+    if new_loss.item() < loss.item():
+        print("✅ SGD step successfully reduced the loss.")
+    else:
+        print("❌ SGD step did not reduce the loss. Investigate gradient correctness.")
+
